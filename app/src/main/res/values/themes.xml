@@ -1,0 +1,9 @@
+<resources xmlns:tools="http://schemas.android.com/tools">
+    <!-- Base application theme. -->
+    <style name="Base.Theme.BLEBeacon" parent="Theme.Material3.DayNight.NoActionBar">
+        <!-- Customize your light theme here. -->
+        <item name="android:fontFamily">@font/poppins</item>
+    </style>
+
+    <style name="Theme.BLEBeacon" parent="Base.Theme.BLEBeacon" />
+</resources>

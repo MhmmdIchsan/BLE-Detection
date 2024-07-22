@@ -1,111 +1,129 @@
 package com.project.blebeacon
 
+import BleManager
 import android.Manifest
 import android.bluetooth.BluetoothAdapter
-import android.bluetooth.BluetoothDevice
+import android.content.Intent
 import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
-import androidx.appcompat.widget.Toolbar
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
+import com.project.blebeacon.R
 
 class MainActivity : AppCompatActivity() {
 
-    private val PERMISSION_REQUEST_CODE = 1
-    private lateinit var bluetoothHandler: BluetoothHandler
+    private lateinit var bleManager: BleManager
     private lateinit var deviceAdapter: DeviceAdapter
+    private val PERMISSION_REQUEST_CODE = 1
+    private val REQUEST_ENABLE_BT = 2
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
-        bluetoothHandler = BluetoothHandler(this)
-        checkPermissions()
-        initRecyclerView()
-
-        val toolbar: Toolbar = findViewById(R.id.toolbar)
-        setSupportActionBar(toolbar)
-        supportActionBar?.title = getString(R.string.app_name)
+        setupRecyclerView()
+        bleManager = BleManager(this)
+        checkAndRequestPermissions()
     }
 
-    private fun checkPermissions() {
-        val permissions = mutableListOf(
-            Manifest.permission.BLUETOOTH,
-            Manifest.permission.BLUETOOTH_ADMIN,
-            Manifest.permission.ACCESS_FINE_LOCATION,
-            "android.permission.BLUETOOTH_SCAN" ,
-            Manifest.permission.BLUETOOTH_CONNECT // Add this line
+    private fun setupRecyclerView() {
+        val recyclerView: RecyclerView = findViewById(R.id.deviceRecyclerView)
+        deviceAdapter = DeviceAdapter()
+        recyclerView.adapter = deviceAdapter
+        recyclerView.layoutManager = LinearLayoutManager(this)
+    }
 
-        )
+    private fun checkAndRequestPermissions() {
+        val permissions = mutableListOf<String>()
 
-        val permissionsToRequest = permissions.filter {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            permissions.add(Manifest.permission.BLUETOOTH_SCAN)
+            permissions.add(Manifest.permission.BLUETOOTH_CONNECT)
+        } else {
+            permissions.add(Manifest.permission.ACCESS_FINE_LOCATION)
+        }
+
+        val notGrantedPermissions = permissions.filter {
             ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
         }
 
-        if (permissionsToRequest.isNotEmpty()) {
-            ActivityCompat.requestPermissions(this, permissionsToRequest.toTypedArray(), PERMISSION_REQUEST_CODE)
+        if (notGrantedPermissions.isNotEmpty()) {
+            ActivityCompat.requestPermissions(this, notGrantedPermissions.toTypedArray(), PERMISSION_REQUEST_CODE)
         } else {
-            initializeBluetoothAndStartScanning()
+            Log.d("BLE", "All required permissions are granted")
+            startScanning()
         }
-    }
-
-    private fun initializeBluetoothAndStartScanning() {
-        if (bluetoothHandler.initBluetooth()) {
-            bluetoothHandler.startScanning { device, name, rssi -> // Add 'rssi' parameter here
-                if (deviceAdapter.deviceExists(device.address)) {
-                    deviceAdapter.updateDevice(device, name, rssi)
-                } else {
-                    deviceAdapter.addDevice(device, name, rssi)
-                }
-            }
-        } else {
-            Toast.makeText(this, "Bluetooth is not enabled", Toast.LENGTH_SHORT).show()
-        }
-    }
-
-    private fun initRecyclerView() {
-        val recyclerView: RecyclerView = findViewById(R.id.recycler_view)
-        recyclerView.layoutManager = LinearLayoutManager(this)
-        deviceAdapter = DeviceAdapter(this)
-        recyclerView.adapter = deviceAdapter
-        Log.d("MainActivity", "RecyclerView initialized")
     }
 
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (requestCode == PERMISSION_REQUEST_CODE) {
-            if (grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
-                // The permission has been granted, you can proceed with accessing the feature or data
-                initializeBluetoothAndStartScanning()
+            if (grantResults.all { it == PackageManager.PERMISSION_GRANTED }) {
+                startScanning()
             } else {
-                // The permission has been denied, you should disable the functionality that depends on this permission
-                Toast.makeText(this, "Permission denied", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, "Permissions are required for BLE scanning", Toast.LENGTH_LONG).show()
             }
         }
     }
 
-    override fun onResume() {
-        super.onResume()
-        if (ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH) == PackageManager.PERMISSION_GRANTED &&
-            ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_ADMIN) == PackageManager.PERMISSION_GRANTED &&
-            ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
-            bluetoothHandler.startScanning { device, name, rssi -> // Add 'name' parameter here
-                if (deviceAdapter.deviceExists(device.address)) {
-                    deviceAdapter.updateDevice(device, name, rssi)
+    private fun startScanning() {
+        val bluetoothAdapter: BluetoothAdapter? = BluetoothAdapter.getDefaultAdapter()
+        if (bluetoothAdapter == null) {
+            Log.e("BLE", "Device doesn't support Bluetooth")
+            return
+        }
+        if (!bluetoothAdapter.isEnabled) {
+            Log.e("BLE", "Bluetooth is not enabled")
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                if (ActivityCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED) {
+                    val enableBtIntent = Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE)
+                    startActivityForResult(enableBtIntent, REQUEST_ENABLE_BT)
                 } else {
-                    deviceAdapter.addDevice(device, name, rssi)
+                    ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.BLUETOOTH_CONNECT), PERMISSION_REQUEST_CODE)
                 }
+            } else {
+                val enableBtIntent = Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE)
+                startActivityForResult(enableBtIntent, REQUEST_ENABLE_BT)
+            }
+            return
+        }
+
+        bleManager.startScanning { device ->
+            runOnUiThread {
+                deviceAdapter.addDevice(device)
+            }
+        }
+
+        // Stop scanning after 30 seconds
+        Handler(Looper.getMainLooper()).postDelayed({
+            bleManager.stopScanning()
+            Log.d("BLE", "Stopped scanning after 30 seconds")
+        }, 30000)
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == REQUEST_ENABLE_BT) {
+            if (resultCode == RESULT_OK) {
+                startScanning()
+            } else {
+                Log.e("BLE", "Bluetooth not enabled")
+                // Handle the case where the user didn't enable Bluetooth
             }
         }
     }
 
-    override fun onPause() {
-        super.onPause()
-        bluetoothHandler.stopScanning()
+
+    override fun onDestroy() {
+        bleManager.stopScanning()
+        super.onDestroy()
     }
 }

@@ -1,6 +1,7 @@
 package com.project.blebeacon
 
-import BleManager
+import com.project.blebeacon.BleManager
+import com.project.blebeacon.DeviceAdapter
 import android.Manifest
 import android.bluetooth.BluetoothAdapter
 import android.content.Intent
@@ -12,6 +13,7 @@ import android.os.Looper
 import android.util.Log
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
+import androidx.appcompat.widget.Toolbar
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.recyclerview.widget.LinearLayoutManager
@@ -28,6 +30,11 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
+
+        val toolbar: Toolbar = findViewById(R.id.toolbar)
+        setSupportActionBar(toolbar)
+        toolbar.title = "Blessed Beacon Scanner"
+        toolbar.setTitleTextColor(ContextCompat.getColor(this, R.color.white))
 
         setupRecyclerView()
         bleManager = BleManager(this)
@@ -103,6 +110,7 @@ class MainActivity : AppCompatActivity() {
         bleManager.startPeriodicUpdate { devices ->
             runOnUiThread {
                 deviceAdapter.updateDevices(devices)
+                (deviceAdapter.recyclerView.layoutManager as? LinearLayoutManager)?.scrollToPosition(0)
             }
         }
     }

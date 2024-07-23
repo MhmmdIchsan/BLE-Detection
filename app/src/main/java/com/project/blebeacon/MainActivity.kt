@@ -97,17 +97,17 @@ class MainActivity : AppCompatActivity() {
         }
 
         bleManager.startScanning { device ->
-            runOnUiThread {
-                deviceAdapter.addDevice(device)
-            }
+            // Callback saat perangkat ditemukan, tidak perlu melakukan apa-apa di sini
         }
 
-        // Stop scanning after 30 seconds
-        Handler(Looper.getMainLooper()).postDelayed({
-            bleManager.stopScanning()
-            Log.d("BLE", "Stopped scanning after 30 seconds")
-        }, 30000)
+        bleManager.startPeriodicUpdate { devices ->
+            runOnUiThread {
+                deviceAdapter.updateDevices(devices)
+            }
+        }
     }
+
+
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
@@ -124,6 +124,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         bleManager.stopScanning()
+        bleManager.stopPeriodicUpdate()
         super.onDestroy()
     }
 }

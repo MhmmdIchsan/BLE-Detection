@@ -18,14 +18,20 @@ import com.welie.blessed.BluetoothCentralManagerCallback
 import com.welie.blessed.BluetoothPeripheral
 import com.welie.blessed.ScanFailure
 import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
+import kotlin.time.Duration.Companion.seconds
 
 class BleManager(private val context: Context) {
 
     private val central: BluetoothCentralManager
-    private val discoveredDevices = mutableListOf<BluetoothDeviceWrapper>()
+    private val discoveredDevices = ConcurrentHashMap<String, BluetoothDeviceWrapper>()
     private val handler = Handler(Looper.getMainLooper())
     private var onDeviceFoundCallback: ((BluetoothDeviceWrapper) -> Unit)? = null
     private val cachedDevices = mutableSetOf<String>() // Set to store cached device addresses
+    private val updateHandler = Handler(Looper.getMainLooper())
+    private val updateInterval = 2000L // 2 detik
+    private var isUpdating = false
+    private val rssiThreshold = -90 // Ambang batas RSSI untuk menganggap perangkat di luar jangkauan
 
     private val centralManagerCallback = object : BluetoothCentralManagerCallback() {
         override fun onDiscovered(peripheral: BluetoothPeripheral, scanResult: ScanResult) {
@@ -44,7 +50,6 @@ class BleManager(private val context: Context) {
 
     fun startScanning(serviceUUID: UUID? = null, deviceName: String? = null, onDeviceFound: (BluetoothDeviceWrapper) -> Unit) {
         Log.d("BLE", "Starting BLE scan")
-        discoveredDevices.clear()
         onDeviceFoundCallback = onDeviceFound
 
         try {
@@ -83,9 +88,9 @@ class BleManager(private val context: Context) {
             deviceType = deviceType
         )
 
-        if (!discoveredDevices.contains(device)) {
-            discoveredDevices.add(device)
-            cachedDevices.add(device.address) // Add the device address to the cached set
+        val existingDevice = discoveredDevices[device.address]
+        if (existingDevice == null || existingDevice.rssi != device.rssi) {
+            discoveredDevices[device.address] = device
             onDeviceFoundCallback?.let { callback ->
                 handler.post { callback(device) }
             }
@@ -98,6 +103,26 @@ class BleManager(private val context: Context) {
         } else {
             ContextCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH) == PackageManager.PERMISSION_GRANTED
         }
+    }
+
+    fun startPeriodicUpdate(onDeviceUpdate: (List<BluetoothDeviceWrapper>) -> Unit) {
+        isUpdating = true
+        updateDevices(onDeviceUpdate)
+    }
+
+    fun stopPeriodicUpdate() {
+        isUpdating = false
+        updateHandler.removeCallbacksAndMessages(null)
+    }
+
+    private fun updateDevices(onDeviceUpdate: (List<BluetoothDeviceWrapper>) -> Unit) {
+        if (!isUpdating) return
+
+        onDeviceUpdate(discoveredDevices.values.toList())
+
+        updateHandler.postDelayed({
+            updateDevices(onDeviceUpdate)
+        }, updateInterval)
     }
 
     private fun getDeviceType(bluetoothClass: BluetoothClass?): String {

@@ -40,4 +40,10 @@ class DeviceAdapter : RecyclerView.Adapter<DeviceAdapter.DeviceViewHolder>() {
             notifyItemInserted(devices.size - 1)
         }
     }
+
+    fun updateDevices(newDevices: List<BluetoothDeviceWrapper>) {
+        devices.clear()
+        devices.addAll(newDevices)
+        notifyDataSetChanged()
+    }
 }

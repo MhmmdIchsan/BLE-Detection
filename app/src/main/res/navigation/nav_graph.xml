@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<navigation xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:id="@+id/nav_graph"
+    app:startDestination="@id/navigation_scanner">
+
+    <fragment
+        android:id="@+id/navigation_scanner"
+        android:name="com.project.blebeacon.ScannerFragment"
+        android:label="Scanner" />
+
+    <fragment
+        android:id="@+id/navigation_dashboard"
+        android:name="com.project.blebeacon.DashboardFragment"
+        android:label="Dashboard" />
+
+    <fragment
+        android:id="@+id/navigation_settings"
+        android:name="com.project.blebeacon.SettingsFragment"
+        android:label="Settings" />
+
+</navigation>

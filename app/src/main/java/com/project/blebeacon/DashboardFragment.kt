@@ -78,11 +78,12 @@ class DashboardFragment : Fragment() {
         bleManager.startPeriodicUpdate { devices ->
             val detection = Detection(System.currentTimeMillis(), devices)
             activity?.runOnUiThread {
-                detectionAdapter.addDetection(detection)
+                detectionAdapter.updateDetections(listOf(detection))
                 rvDetections.scrollToPosition(0)
             }
         }
     }
+
 
     private fun stopPeriodicUpdate() {
         bleManager.stopPeriodicUpdate()
@@ -95,4 +96,3 @@ class DashboardFragment : Fragment() {
 }
 
 data class Detection(val timestamp: Long, val devices: List<BluetoothDeviceWrapper>)
-

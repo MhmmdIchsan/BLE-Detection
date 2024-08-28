@@ -4,16 +4,18 @@ import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.TextView
+import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import java.util.Date
 
 class DetectionAdapter(private val onItemClick: (Detection) -> Unit) : RecyclerView.Adapter<DetectionAdapter.ViewHolder>() {
-    private val detections = mutableListOf<Detection>()
+    private var detections = listOf<Detection>()
 
-    fun addDetection(detection: Detection) {
-        detections.add(0, detection)
-        notifyItemInserted(0)
+    fun updateDetections(newDetections: List<Detection>) {
+        val diffResult = DiffUtil.calculateDiff(DetectionDiffCallback(detections, newDetections))
+        detections = newDetections
+        diffResult.dispatchUpdatesTo(this)
     }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ViewHolder {
@@ -22,8 +24,7 @@ class DetectionAdapter(private val onItemClick: (Detection) -> Unit) : RecyclerV
     }
 
     override fun onBindViewHolder(holder: ViewHolder, position: Int) {
-        val detection = detections[position]
-        holder.bind(detection)
+        holder.bind(detections[position])
     }
 
     override fun getItemCount() = detections.size
@@ -33,7 +34,12 @@ class DetectionAdapter(private val onItemClick: (Detection) -> Unit) : RecyclerV
         private val tvDeviceCount: TextView = itemView.findViewById(R.id.tvDeviceCount)
 
         init {
-            itemView.setOnClickListener { onItemClick(detections[adapterPosition]) }
+            itemView.setOnClickListener {
+                val position = adapterPosition
+                if (position != RecyclerView.NO_POSITION) { // Periksa validitas posisi
+                    onItemClick(detections[position])
+                }
+            }
         }
 
         fun bind(detection: Detection) {
@@ -41,4 +47,21 @@ class DetectionAdapter(private val onItemClick: (Detection) -> Unit) : RecyclerV
             tvDeviceCount.text = "Devices detected: ${detection.devices.size}"
         }
     }
+
+}
+
+class DetectionDiffCallback(
+    private val oldList: List<Detection>,
+    private val newList: List<Detection>
+) : DiffUtil.Callback() {
+
+    override fun getOldListSize() = oldList.size
+
+    override fun getNewListSize() = newList.size
+
+    override fun areItemsTheSame(oldItemPosition: Int, newItemPosition: Int) =
+        oldList[oldItemPosition].timestamp == newList[newItemPosition].timestamp
+
+    override fun areContentsTheSame(oldItemPosition: Int, newItemPosition: Int) =
+        oldList[oldItemPosition] == newList[newItemPosition]
 }

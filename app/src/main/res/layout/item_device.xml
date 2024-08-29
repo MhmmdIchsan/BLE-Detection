@@ -1,73 +1,62 @@
 <?xml version="1.0" encoding="utf-8"?>
-<layout xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:app="http://schemas.android.com/apk/res-auto">
+<androidx.cardview.widget.CardView
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:layout_margin="8dp"
+    app:cardCornerRadius="8dp">
 
-    <androidx.cardview.widget.CardView
+    <RelativeLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_margin="8dp"
-        app:cardCornerRadius="8dp">
+        android:background="@drawable/item_background"
+        android:padding="16dp">
 
-        <RelativeLayout
+        <LinearLayout
+            android:id="@+id/text_container"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:background="@drawable/item_background"
-            android:padding="16dp">
-
-            <LinearLayout
-                android:id="@+id/text_container"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_toStartOf="@+id/signal_strength"
-                android:orientation="vertical">
-
-                <TextView
-                    android:id="@+id/deviceNameTextView"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:textStyle="bold"
-                    android:text="Device Name" />
-
-                <TextView
-                    android:id="@+id/deviceTypeTextView"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:textSize="16sp"
-                    android:layout_marginStart="8dp"
-                    android:layout_marginTop="4dp"
-                    android:text="Device Type"/>
-
-                <TextView
-                    android:id="@+id/deviceAddressTextView"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="Device Address" />
-
-                <TextView
-                    android:id="@+id/deviceDistanceTextView"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="RSSI"/>
-
-            </LinearLayout>
-
-            <ImageView
-                android:id="@+id/signal_strength"
-                android:layout_width="48dp"
-                android:layout_height="48dp"
-                android:layout_alignParentEnd="true"
-                android:src="@drawable/signal_strength" />
+            android:layout_toStartOf="@+id/signal_strength"
+            android:orientation="vertical">
 
             <TextView
-                android:id="@+id/deviceRssiTextView"
+                android:id="@+id/deviceNameTextView"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_below="@+id/signal_strength"
-                android:layout_alignParentEnd="true"
+                android:textStyle="bold"
+                android:text="Device Name" />
+
+            <TextView
+                android:id="@+id/deviceTypeTextView"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textSize="16sp"
+                android:layout_marginStart="8dp"
+                android:layout_marginTop="4dp"
+                android:text="Device Type"/>
+
+            <TextView
+                android:id="@+id/deviceAddressTextView"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Device Address" />
+
+            <TextView
+                android:id="@+id/deviceDistanceTextView"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
                 android:text="RSSI"/>
 
-        </RelativeLayout>
+        </LinearLayout>
 
-    </androidx.cardview.widget.CardView>
+        <TextView
+            android:id="@+id/deviceRssiTextView"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_alignParentEnd="true"
+            android:text="RSSI"/>
 
-</layout>
+    </RelativeLayout>
+
+</androidx.cardview.widget.CardView>

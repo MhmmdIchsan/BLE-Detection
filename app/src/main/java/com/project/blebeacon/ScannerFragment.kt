@@ -41,7 +41,10 @@ class ScannerFragment : Fragment() {
 
     private fun setupRecyclerView() {
         val recyclerView: RecyclerView = view?.findViewById(R.id.deviceRecyclerView) ?: return
-        deviceAdapter = DeviceAdapter()
+        deviceAdapter = DeviceAdapter { device ->
+            // Handle device click if needed
+            Toast.makeText(context, "Clicked: ${device.name}", Toast.LENGTH_SHORT).show()
+        }
         recyclerView.adapter = deviceAdapter
         recyclerView.layoutManager = LinearLayoutManager(context)
     }

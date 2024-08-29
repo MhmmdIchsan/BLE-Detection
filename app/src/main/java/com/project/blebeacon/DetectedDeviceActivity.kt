@@ -30,10 +30,12 @@ class DetectedDevicesActivity : AppCompatActivity() {
 
         tvTimestamp.text = "Timestamp: ${Date(timestamp)}"
 
+        deviceAdapter = DeviceAdapter()
         deviceAdapter = DeviceAdapter { device ->
             // Handle device click if needed
             Toast.makeText(this, "Clicked: ${device.name}", Toast.LENGTH_SHORT).show()
         }
+
         rvDevices.adapter = deviceAdapter
         rvDevices.layoutManager = LinearLayoutManager(this)
 

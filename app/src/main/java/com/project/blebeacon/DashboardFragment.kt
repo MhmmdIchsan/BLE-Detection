@@ -6,12 +6,9 @@ import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Button
-import android.widget.TextView
 import androidx.fragment.app.Fragment
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
-import java.util.*
-import kotlin.concurrent.fixedRateTimer
 
 class DashboardFragment : Fragment() {
 
@@ -20,8 +17,6 @@ class DashboardFragment : Fragment() {
     private lateinit var detectionAdapter: DetectionAdapter
     private lateinit var bleManager: BleManager
     private var isScanning = false
-    private var timer: Timer? = null
-    private val scannedDevices = mutableListOf<BluetoothDeviceWrapper>()
 
     override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View? {
         return inflater.inflate(R.layout.fragment_dashboard, container, false)
@@ -47,7 +42,6 @@ class DashboardFragment : Fragment() {
 
     private fun setupRecyclerView() {
         detectionAdapter = DetectionAdapter { detection ->
-            // Handle item click
             val intent = Intent(requireContext(), DetectedDevicesActivity::class.java)
             intent.putExtra("TIMESTAMP", detection.timestamp)
             intent.putExtra("DEVICES", ArrayList(detection.devices))
@@ -60,10 +54,7 @@ class DashboardFragment : Fragment() {
     private fun startScanning() {
         isScanning = true
         btnStartStop.text = "Stop"
-        scannedDevices.clear()
-        bleManager.startScanning { device ->
-            scannedDevices.add(device)
-        }
+        bleManager.startScanning { /* No need to do anything here */ }
         startPeriodicUpdate()
     }
 
@@ -78,12 +69,11 @@ class DashboardFragment : Fragment() {
         bleManager.startPeriodicUpdate { devices ->
             val detection = Detection(System.currentTimeMillis(), devices)
             activity?.runOnUiThread {
-                detectionAdapter.updateDetections(listOf(detection))
+                detectionAdapter.addDetection(detection)
                 rvDetections.scrollToPosition(0)
             }
         }
     }
-
 
     private fun stopPeriodicUpdate() {
         bleManager.stopPeriodicUpdate()

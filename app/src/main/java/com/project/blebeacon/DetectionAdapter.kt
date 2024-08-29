@@ -4,64 +4,35 @@ import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.TextView
-import androidx.recyclerview.widget.DiffUtil
-import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
-import java.util.Date
+import java.text.SimpleDateFormat
+import java.util.*
 
-class DetectionAdapter(private val onItemClick: (Detection) -> Unit) : RecyclerView.Adapter<DetectionAdapter.ViewHolder>() {
-    private var detections = listOf<Detection>()
+class DetectionAdapter(private val onItemClick: (Detection) -> Unit) : RecyclerView.Adapter<DetectionAdapter.DetectionViewHolder>() {
+    private val detections = mutableListOf<Detection>()
 
-    fun updateDetections(newDetections: List<Detection>) {
-        val diffResult = DiffUtil.calculateDiff(DetectionDiffCallback(detections, newDetections))
-        detections = newDetections
-        diffResult.dispatchUpdatesTo(this)
+    class DetectionViewHolder(view: View) : RecyclerView.ViewHolder(view) {
+        val tvTimestamp: TextView = view.findViewById(R.id.tvTimestamp)
+        val tvDeviceCount: TextView = view.findViewById(R.id.tvDeviceCount)
     }
 
-    override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ViewHolder {
+    override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): DetectionViewHolder {
         val view = LayoutInflater.from(parent.context).inflate(R.layout.item_detection, parent, false)
-        return ViewHolder(view)
+        return DetectionViewHolder(view)
     }
 
-    override fun onBindViewHolder(holder: ViewHolder, position: Int) {
-        holder.bind(detections[position])
+    override fun onBindViewHolder(holder: DetectionViewHolder, position: Int) {
+        val detection = detections[position]
+        val sdf = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
+        holder.tvTimestamp.text = sdf.format(Date(detection.timestamp))
+        holder.tvDeviceCount.text = "Devices: ${detection.devices.size}"
+        holder.itemView.setOnClickListener { onItemClick(detection) }
     }
 
     override fun getItemCount() = detections.size
 
-    inner class ViewHolder(itemView: View) : RecyclerView.ViewHolder(itemView) {
-        private val tvTimestamp: TextView = itemView.findViewById(R.id.tvTimestamp)
-        private val tvDeviceCount: TextView = itemView.findViewById(R.id.tvDeviceCount)
-
-        init {
-            itemView.setOnClickListener {
-                val position = adapterPosition
-                if (position != RecyclerView.NO_POSITION) { // Periksa validitas posisi
-                    onItemClick(detections[position])
-                }
-            }
-        }
-
-        fun bind(detection: Detection) {
-            tvTimestamp.text = Date(detection.timestamp).toString()
-            tvDeviceCount.text = "Devices detected: ${detection.devices.size}"
-        }
+    fun addDetection(detection: Detection) {
+        detections.add(0, detection) // Add new detection at the beginning of the list
+        notifyItemInserted(0)
     }
-
-}
-
-class DetectionDiffCallback(
-    private val oldList: List<Detection>,
-    private val newList: List<Detection>
-) : DiffUtil.Callback() {
-
-    override fun getOldListSize() = oldList.size
-
-    override fun getNewListSize() = newList.size
-
-    override fun areItemsTheSame(oldItemPosition: Int, newItemPosition: Int) =
-        oldList[oldItemPosition].timestamp == newList[newItemPosition].timestamp
-
-    override fun areContentsTheSame(oldItemPosition: Int, newItemPosition: Int) =
-        oldList[oldItemPosition] == newList[newItemPosition]
 }

@@ -7,8 +7,13 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.Button
 import androidx.fragment.app.Fragment
+import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
+import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.*
+import java.text.SimpleDateFormat
+import java.util.*
 
 class DashboardFragment : Fragment() {
 
@@ -17,6 +22,8 @@ class DashboardFragment : Fragment() {
     private lateinit var detectionAdapter: DetectionAdapter
     private lateinit var bleManager: BleManager
     private var isScanning = false
+    private val detections = mutableListOf<Detection>()
+    private val dateFormat = SimpleDateFormat("dd-MMM-yyyy HH:mm:ss.SSS", Locale.getDefault())
 
     override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View? {
         return inflater.inflate(R.layout.fragment_dashboard, container, false)
@@ -54,29 +61,36 @@ class DashboardFragment : Fragment() {
     private fun startScanning() {
         isScanning = true
         btnStartStop.text = "Stop"
-        bleManager.startScanning { /* No need to do anything here */ }
-        startPeriodicUpdate()
+        detections.clear()
+        detectionAdapter.updateDetections(detections)
+        bleManager.startScanning()
+
+        viewLifecycleOwner.lifecycleScope.launch {
+            flow {
+                while (isScanning) {
+                    emit(Unit)
+                    delay(500) // Emit every 500 milliseconds
+                }
+            }.conflate() // In case processing takes longer than 500ms
+                .collect {
+                    val currentTime = System.currentTimeMillis()
+                    val formattedTime = dateFormat.format(Date(currentTime))
+                    val latestDevices = bleManager.scannedDevices.value
+                    val detection = Detection(formattedTime, latestDevices)
+                    detections.add(0, detection)
+                    if (detections.size > 100) { // Limit to last 100 detections
+                        detections.removeAt(detections.lastIndex)
+                    }
+                    detectionAdapter.updateDetections(detections)
+                    rvDetections.scrollToPosition(0)
+                }
+        }
     }
 
     private fun stopScanning() {
         isScanning = false
         btnStartStop.text = "Start"
         bleManager.stopScanning()
-        stopPeriodicUpdate()
-    }
-
-    private fun startPeriodicUpdate() {
-        bleManager.startPeriodicUpdate { devices ->
-            val detection = Detection(System.currentTimeMillis(), devices)
-            activity?.runOnUiThread {
-                detectionAdapter.addDetection(detection)
-                rvDetections.scrollToPosition(0)
-            }
-        }
-    }
-
-    private fun stopPeriodicUpdate() {
-        bleManager.stopPeriodicUpdate()
     }
 
     override fun onDestroy() {
@@ -85,4 +99,4 @@ class DashboardFragment : Fragment() {
     }
 }
 
-data class Detection(val timestamp: Long, val devices: List<BluetoothDeviceWrapper>)
+data class Detection(val timestamp: String, val devices: List<BluetoothDeviceWrapper>)

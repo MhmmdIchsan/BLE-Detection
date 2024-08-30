@@ -1,6 +1,7 @@
 package com.project.blebeacon
 
-import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import android.Manifest
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothClass
@@ -13,99 +14,90 @@ import android.bluetooth.le.ScanSettings
 import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
-import android.os.Handler
-import android.os.Looper
 import android.util.Log
 import androidx.core.content.ContextCompat
 import java.io.Serializable
-import java.util.concurrent.ConcurrentHashMap
 import kotlin.math.pow
 
 class BleManager(private val context: Context) {
-    private val scanJob = Job()
-    private val scanScope = CoroutineScope(Dispatchers.Default + scanJob)
     private val bluetoothManager: BluetoothManager = context.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
     private val bluetoothAdapter: BluetoothAdapter? = bluetoothManager.adapter
     private val bluetoothLeScanner: BluetoothLeScanner? = bluetoothAdapter?.bluetoothLeScanner
-    private val discoveredDevices = ConcurrentHashMap<String, Pair<BluetoothDeviceWrapper, Long>>()
-    private val updateHandler = Handler(Looper.getMainLooper())
-    private val updateInterval = 2000L
-    private var isUpdating = false
-    private val deviceTimeout = 5000L
 
-    private var onDeviceFoundCallback: ((BluetoothDeviceWrapper) -> Unit)? = null
+    private val _scannedDevices = MutableStateFlow<List<BluetoothDeviceWrapper>>(emptyList())
+    val scannedDevices: StateFlow<List<BluetoothDeviceWrapper>> = _scannedDevices
 
-    private val leScanCallback = object : ScanCallback() {
+    private var isScanning = false
+    private val scanCallback = object : ScanCallback() {
         override fun onScanResult(callbackType: Int, result: ScanResult) {
-            handleDiscoveredDevice(result)
-        }
-
-        override fun onScanFailed(errorCode: Int) {
-            Log.e("BLE", "Scan failed with error code: $errorCode")
+            val device = createBluetoothDeviceWrapper(result)
+            updateScannedDevices(device)
         }
     }
 
-    fun startScanning(onDeviceFound: (BluetoothDeviceWrapper) -> Unit) {
-        Log.d("BLE", "Starting BLE scan")
-        onDeviceFoundCallback = onDeviceFound
-
+    fun startScanning() {
         if (!hasBluetoothPermission()) {
             Log.e("BLE", "Bluetooth permission not granted")
             return
         }
+
+        if (isScanning) return
 
         val scanSettings = ScanSettings.Builder()
             .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
             .build()
 
         try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                if (ContextCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_SCAN) == PackageManager.PERMISSION_GRANTED) {
-                    bluetoothLeScanner?.startScan(null, scanSettings, leScanCallback)
-                    Log.d("BLE", "Started scanning for BLE devices")
-                } else {
-                    Log.e("BLE", "BLUETOOTH_SCAN permission not granted")
-                }
-            } else {
-                if (ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
-                    bluetoothLeScanner?.startScan(null, scanSettings, leScanCallback)
-                    Log.d("BLE", "Started scanning for BLE devices")
-                } else {
-                    Log.e("BLE", "ACCESS_FINE_LOCATION permission not granted")
-                }
-            }
+            bluetoothLeScanner?.startScan(null, scanSettings, scanCallback)
+            isScanning = true
+            Log.d("BLE", "Started continuous scanning for BLE devices")
         } catch (e: SecurityException) {
             Log.e("BLE", "SecurityException when starting scan: ${e.message}")
-        } catch (e: Exception) {
-            Log.e("BLE", "Error starting scan: ${e.message}")
         }
     }
 
     fun stopScanning() {
-        if (!hasBluetoothPermission()) return
+        if (!isScanning) return
+
         try {
-            bluetoothLeScanner?.stopScan(leScanCallback)
+            bluetoothLeScanner?.stopScan(scanCallback)
+            isScanning = false
             Log.d("BLE", "Stopped scanning")
         } catch (e: SecurityException) {
             Log.e("BLE", "SecurityException when stopping scan: ${e.message}")
         }
     }
 
-    private fun handleDiscoveredDevice(result: ScanResult) {
-        val deviceType = getDeviceType(result.device)
-        val deviceName = getDeviceName(result.device)
-        val distance = calculateDistance(result.rssi, result.txPower)
+    private fun updateScannedDevices(newDevice: BluetoothDeviceWrapper) {
+        val currentDevices = _scannedDevices.value.toMutableList()
+        val existingDeviceIndex = currentDevices.indexOfFirst { it.address == newDevice.address }
 
-        val device = BluetoothDeviceWrapper(
-            name = deviceName,
+        if (existingDeviceIndex != -1) {
+            currentDevices[existingDeviceIndex] = newDevice
+        } else {
+            currentDevices.add(newDevice)
+        }
+
+        _scannedDevices.value = currentDevices
+    }
+
+    private fun createBluetoothDeviceWrapper(result: ScanResult): BluetoothDeviceWrapper {
+        return BluetoothDeviceWrapper(
+            name = getDeviceName(result.device),
             address = result.device.address,
             rssi = result.rssi,
-            deviceType = deviceType,
-            distance = distance
+            deviceType = getDeviceType(result.device),
+            distance = calculateDistance(result.rssi, result.txPower)
         )
+    }
 
-        discoveredDevices[device.address] = Pair(device, System.currentTimeMillis())
-        onDeviceFoundCallback?.invoke(device)
+    private fun hasBluetoothPermission(): Boolean {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            ContextCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_SCAN) == PackageManager.PERMISSION_GRANTED &&
+                    ContextCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED
+        } else {
+            ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        }
     }
 
     private fun calculateDistance(rssi: Int, txPower: Int): Double {
@@ -134,54 +126,6 @@ class BleManager(private val context: Context) {
         } catch (e: SecurityException) {
             Log.e("BLE", "SecurityException when getting device name: ${e.message}")
             "Unknown (Security Exception)"
-        }
-    }
-
-    private fun hasBluetoothPermission(): Boolean {
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            ContextCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_SCAN) == PackageManager.PERMISSION_GRANTED &&
-                    ContextCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED
-        } else {
-            ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
-        }
-    }
-
-    fun startPeriodicUpdate(onDeviceUpdate: (List<BluetoothDeviceWrapper>) -> Unit) {
-        isUpdating = true
-        updateDevices(onDeviceUpdate)
-    }
-
-    fun stopPeriodicUpdate() {
-        isUpdating = false
-        updateHandler.removeCallbacksAndMessages(null)
-    }
-
-    private fun updateDevices(onDeviceUpdate: (List<BluetoothDeviceWrapper>) -> Unit) {
-        if (!isUpdating) return
-
-        scanScope.launch {
-            val currentTime = System.currentTimeMillis()
-            val devicesToRemove = mutableListOf<String>()
-
-            discoveredDevices.forEach { (address, pair) ->
-                val (device, lastSeenTime) = pair
-                if (currentTime - lastSeenTime > deviceTimeout) {
-                    devicesToRemove.add(address)
-                }
-            }
-
-            devicesToRemove.forEach { address ->
-                discoveredDevices.remove(address)
-            }
-
-            val devices = discoveredDevices.values.map { it.first }
-
-            withContext(Dispatchers.Main) {
-                onDeviceUpdate(devices)
-            }
-
-            delay(updateInterval)
-            updateDevices(onDeviceUpdate)
         }
     }
 

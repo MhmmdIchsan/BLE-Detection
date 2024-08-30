@@ -13,20 +13,26 @@ import android.util.Log
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.widget.Button
 import android.widget.Toast
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.Fragment
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
-import com.project.blebeacon.R
+import kotlinx.coroutines.*
 
 class ScannerFragment : Fragment() {
 
     private lateinit var bleManager: BleManager
     private lateinit var deviceAdapter: DeviceAdapter
+    private lateinit var scanButton: Button
+    private lateinit var recyclerView: RecyclerView
     private val PERMISSION_REQUEST_CODE = 1
     private val REQUEST_ENABLE_BT = 2
+    private var isScanning = false
+    private val scanJob = Job()
+    private val scanScope = CoroutineScope(Dispatchers.Default + scanJob)
 
     override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View? {
         return inflater.inflate(R.layout.fragment_scanner, container, false)
@@ -34,15 +40,28 @@ class ScannerFragment : Fragment() {
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
-        setupRecyclerView()
+        setupViews(view)
         bleManager = BleManager(requireContext())
         checkAndRequestPermissions()
     }
 
+    private fun setupViews(view: View) {
+        recyclerView = view.findViewById(R.id.deviceRecyclerView)
+        scanButton = view.findViewById(R.id.scanButton)
+
+        setupRecyclerView()
+
+        scanButton.setOnClickListener {
+            if (isScanning) {
+                stopScanning()
+            } else {
+                startScanning()
+            }
+        }
+    }
+
     private fun setupRecyclerView() {
-        val recyclerView: RecyclerView = view?.findViewById(R.id.deviceRecyclerView) ?: return
         deviceAdapter = DeviceAdapter { device ->
-            // Handle device click if needed
             Toast.makeText(context, "Clicked: ${device.name}", Toast.LENGTH_SHORT).show()
         }
         recyclerView.adapter = deviceAdapter
@@ -67,21 +86,21 @@ class ScannerFragment : Fragment() {
             requestPermissions(notGrantedPermissions.toTypedArray(), PERMISSION_REQUEST_CODE)
         } else {
             Log.d("BLE", "All required permissions are granted")
-            startScanning()
+            enableBluetooth()
         }
     }
 
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         if (requestCode == PERMISSION_REQUEST_CODE) {
             if (grantResults.all { it == PackageManager.PERMISSION_GRANTED }) {
-                startScanning()
+                enableBluetooth()
             } else {
                 Toast.makeText(context, "Permissions are required for BLE scanning", Toast.LENGTH_LONG).show()
             }
         }
     }
 
-    private fun startScanning() {
+    private fun enableBluetooth() {
         val bluetoothManager = requireContext().getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
         val bluetoothAdapter = bluetoothManager.adapter
 
@@ -91,9 +110,8 @@ class ScannerFragment : Fragment() {
         }
 
         if (!bluetoothAdapter.isEnabled) {
-            Log.e("BLE", "Bluetooth is not enabled")
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                if (ContextCompat.checkSelfPermission(requireContext(), Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED) {
+                if (ActivityCompat.checkSelfPermission(requireContext(), Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED) {
                     val enableBtIntent = Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE)
                     startActivityForResult(enableBtIntent, REQUEST_ENABLE_BT)
                 } else {
@@ -104,35 +122,41 @@ class ScannerFragment : Fragment() {
                 val enableBtIntent = Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE)
                 startActivityForResult(enableBtIntent, REQUEST_ENABLE_BT)
             }
-            return
+        } else {
+            scanButton.isEnabled = true
         }
+    }
 
-        bleManager.startScanning { device ->
-            // Tidak perlu melakukan apa-apa di sini, karena kita akan menangani pembaruan dalam startPeriodicUpdate
+    private fun startScanning() {
+        isScanning = true
+        scanButton.text = "Stop Scan"
+        if (!isScanning) {
+            bleManager.startScanning()  // Replacing scanForDevices() with startScanning()
+            isScanning = true
         }
+    }
 
-        bleManager.startPeriodicUpdate { devices ->
-            activity?.runOnUiThread {
-                deviceAdapter.updateDevices(devices)
-            }
-        }
+    private fun stopScanning() {
+        isScanning = false
+        scanButton.text = "Start Scan"
+        scanJob.cancel()
     }
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
         if (requestCode == REQUEST_ENABLE_BT) {
             if (resultCode == Activity.RESULT_OK) {
-                startScanning()
+                scanButton.isEnabled = true
             } else {
                 Log.e("BLE", "Bluetooth not enabled")
-                // Handle the case where the user didn't enable Bluetooth
+                Toast.makeText(context, "Bluetooth is required for scanning", Toast.LENGTH_LONG).show()
             }
         }
     }
 
     override fun onDestroy() {
-        bleManager.stopScanning()
-        bleManager.stopPeriodicUpdate()
+        stopScanning()
+        scanJob.cancel()
         super.onDestroy()
     }
 }

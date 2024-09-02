@@ -18,6 +18,7 @@ import android.widget.Toast
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.Fragment
+import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import kotlinx.coroutines.*
@@ -32,7 +33,7 @@ class ScannerFragment : Fragment() {
     private val REQUEST_ENABLE_BT = 2
     private var isScanning = false
     private val scanJob = Job()
-    private val scanScope = CoroutineScope(Dispatchers.Default + scanJob)
+    private val scanScope = CoroutineScope(Dispatchers.Main + scanJob)
 
     override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View? {
         return inflater.inflate(R.layout.fragment_scanner, container, false)
@@ -130,15 +131,20 @@ class ScannerFragment : Fragment() {
     private fun startScanning() {
         isScanning = true
         scanButton.text = "Stop Scan"
-        if (!isScanning) {
-            bleManager.startScanning()  // Replacing scanForDevices() with startScanning()
-            isScanning = true
+        bleManager.startScanning()
+
+        // Mulai mengamati hasil pemindaian
+        viewLifecycleOwner.lifecycleScope.launch {
+            bleManager.scannedDevices.collect { devices ->
+                deviceAdapter.submitList(devices)
+            }
         }
     }
 
     private fun stopScanning() {
         isScanning = false
         scanButton.text = "Start Scan"
+        bleManager.stopScanning()
         scanJob.cancel()
     }
 

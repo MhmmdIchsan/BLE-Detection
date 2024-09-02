@@ -1,5 +1,6 @@
 package com.project.blebeacon
 
+import android.graphics.Color
 import androidx.appcompat.app.AppCompatActivity
 import android.os.Bundle
 import androidx.appcompat.widget.Toolbar // Make sure to import this
@@ -18,8 +19,10 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
+        window.statusBarColor = Color.BLACK
         // Find the Toolbar and set it as the ActionBar
         val toolbar: Toolbar = findViewById(R.id.toolbar)
+        toolbar.setTitleTextColor(Color.WHITE)
         setSupportActionBar(toolbar) // This line sets the Toolbar as the ActionBar
 
         val navHostFragment = supportFragmentManager.findFragmentById(R.id.nav_host_fragment) as NavHostFragment

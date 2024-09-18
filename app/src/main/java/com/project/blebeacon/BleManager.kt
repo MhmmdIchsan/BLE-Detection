@@ -16,7 +16,16 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.util.Log
 import androidx.core.content.ContextCompat
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import java.io.Serializable
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import kotlin.math.pow
 
 class BleManager(private val context: Context) {
@@ -35,6 +44,11 @@ class BleManager(private val context: Context) {
         }
     }
 
+    private val coroutineScope = CoroutineScope(Dispatchers.Default + Job())
+    private var cleanupJob: Job? = null
+    private val inactivityThreshold = 3000L // 3 seconds
+    private val dateFormat = SimpleDateFormat("HH:mm:ss.SSS", Locale.getDefault())
+
     fun startScanning() {
         if (!hasBluetoothPermission()) {
             Log.e("BLE", "Bluetooth permission not granted")
@@ -51,6 +65,7 @@ class BleManager(private val context: Context) {
             bluetoothLeScanner?.startScan(null, scanSettings, scanCallback)
             isScanning = true
             Log.d("BLE", "Started continuous scanning for BLE devices")
+            startPeriodicCleanup()
         } catch (e: SecurityException) {
             Log.e("BLE", "SecurityException when starting scan: ${e.message}")
         }
@@ -62,9 +77,42 @@ class BleManager(private val context: Context) {
         try {
             bluetoothLeScanner?.stopScan(scanCallback)
             isScanning = false
+            stopPeriodicCleanup()
             Log.d("BLE", "Stopped scanning")
         } catch (e: SecurityException) {
             Log.e("BLE", "SecurityException when stopping scan: ${e.message}")
+        }
+    }
+
+    private fun startPeriodicCleanup() {
+        cleanupJob = coroutineScope.launch {
+            while (isActive) {
+                delay(inactivityThreshold)
+                removeInactiveDevices()
+            }
+        }
+    }
+
+    private fun stopPeriodicCleanup() {
+        cleanupJob?.cancel()
+        cleanupJob = null
+    }
+
+    private fun removeInactiveDevices() {
+        val currentTime = System.currentTimeMillis()
+        val (activeDevices, inactiveDevices) = _scannedDevices.value.partition { device ->
+            currentTime - device.lastSeenTimestamp < inactivityThreshold
+        }
+
+        if (inactiveDevices.isNotEmpty()) {
+            _scannedDevices.value = activeDevices
+            logRemovedDevices(inactiveDevices)
+        }
+    }
+
+    private fun logRemovedDevices(removedDevices: List<BluetoothDeviceWrapper>) {
+        val currentTime = System.currentTimeMillis()
+        removedDevices.forEachIndexed { index, device ->
         }
     }
 
@@ -87,7 +135,8 @@ class BleManager(private val context: Context) {
             address = result.device.address,
             rssi = result.rssi,
             deviceType = getDeviceType(result.device),
-            distance = calculateDistance(result.rssi, result.txPower)
+            distance = calculateDistance(result.rssi, result.txPower),
+            lastSeenTimestamp = System.currentTimeMillis()
         )
     }
 
@@ -200,5 +249,6 @@ data class BluetoothDeviceWrapper(
     val address: String,
     val rssi: Int,
     val deviceType: String,
-    val distance: Double
+    val distance: Double,
+    val lastSeenTimestamp: Long
 ) : Serializable

@@ -2,6 +2,7 @@ package com.project.blebeacon
 
 import android.content.Intent
 import android.os.Bundle
+import android.util.Log
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
@@ -24,6 +25,9 @@ class DashboardFragment : Fragment() {
     private var isScanning = false
     private val detections = mutableListOf<Detection>()
     private val dateFormat = SimpleDateFormat("dd-MMM-yyyy HH:mm:ss.SSS", Locale.getDefault())
+
+    private val scanJob = Job()
+    private val scanScope = CoroutineScope(Dispatchers.Default + scanJob)
 
     override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View? {
         return inflater.inflate(R.layout.fragment_dashboard, container, false)
@@ -65,7 +69,7 @@ class DashboardFragment : Fragment() {
         detectionAdapter.updateDetections(detections)
         bleManager.startScanning()
 
-        viewLifecycleOwner.lifecycleScope.launch {
+        scanScope.launch {
             flow {
                 while (isScanning) {
                     emit(Unit)
@@ -77,12 +81,18 @@ class DashboardFragment : Fragment() {
                     val formattedTime = dateFormat.format(Date(currentTime))
                     val latestDevices = bleManager.scannedDevices.value
                     val detection = Detection(formattedTime, latestDevices)
-                    detections.add(0, detection)
-                    if (detections.size > 100) { // Limit to last 100 detections
-                        detections.removeAt(detections.lastIndex)
+
+                    withContext(Dispatchers.Main) {
+                        detections.add(0, detection)
+                        if (detections.size > 10) {
+                            detections.removeAt(detections.lastIndex)
+                        }
+                        detectionAdapter.updateDetections(detections)
+                        rvDetections.scrollToPosition(0)
                     }
-                    detectionAdapter.updateDetections(detections)
-                    rvDetections.scrollToPosition(0)
+
+                    // Send data to API
+                    sendDetectionToApi(detection)
                 }
         }
     }
@@ -91,10 +101,37 @@ class DashboardFragment : Fragment() {
         isScanning = false
         btnStartStop.text = "Start"
         bleManager.stopScanning()
+        scanJob.cancel()
+    }
+
+    private suspend fun sendDetectionToApi(detection: Detection) {
+        try {
+            val addresses = detection.devices.map { it.address }
+
+            val devicesResponse = withContext(Dispatchers.IO) {
+                RetrofitInstance.apiService.postDetection(
+                    DetectionRequest(
+                        timestamp = detection.timestamp,
+                        device = detection.devices.size,
+                        addresses = addresses
+                    )
+                )
+            }
+
+            if (devicesResponse.isSuccessful) {
+                Log.d("API", "Successfully posted to /devices")
+            } else {
+                Log.e("API", "Error posting to /devices: ${devicesResponse.errorBody()?.string()}")
+            }
+
+        } catch (e: Exception) {
+            Log.e("API", "Exception: ${e.message}")
+        }
     }
 
     override fun onDestroy() {
         stopScanning()
+        scanJob.cancel()
         super.onDestroy()
     }
 }

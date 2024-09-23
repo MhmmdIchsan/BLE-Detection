@@ -1,14 +1,13 @@
 package com.project.blebeacon
 
-import android.content.Intent
 import android.os.Bundle
 import android.util.Log
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Button
+import android.widget.TextView
 import androidx.fragment.app.Fragment
-import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import kotlinx.coroutines.*
@@ -19,6 +18,8 @@ import java.util.*
 class DashboardFragment : Fragment() {
 
     private lateinit var btnStartStop: Button
+    private lateinit var tvDeviceCount: TextView
+    private lateinit var tvTimestamp: TextView
     private lateinit var rvDetections: RecyclerView
     private lateinit var detectionAdapter: DetectionAdapter
     private lateinit var bleManager: BleManager
@@ -37,6 +38,8 @@ class DashboardFragment : Fragment() {
         super.onViewCreated(view, savedInstanceState)
 
         btnStartStop = view.findViewById(R.id.btnStartStop)
+        tvDeviceCount = view.findViewById(R.id.tvDeviceCount)
+        tvTimestamp = view.findViewById(R.id.tvTimestamp)
         rvDetections = view.findViewById(R.id.rvDetections)
 
         bleManager = BleManager(requireContext())
@@ -52,12 +55,7 @@ class DashboardFragment : Fragment() {
     }
 
     private fun setupRecyclerView() {
-        detectionAdapter = DetectionAdapter { detection ->
-            val intent = Intent(requireContext(), DetectedDevicesActivity::class.java)
-            intent.putExtra("TIMESTAMP", detection.timestamp)
-            intent.putExtra("DEVICES", ArrayList(detection.devices))
-            startActivity(intent)
-        }
+        detectionAdapter = DetectionAdapter()
         rvDetections.adapter = detectionAdapter
         rvDetections.layoutManager = LinearLayoutManager(requireContext())
     }
@@ -73,9 +71,9 @@ class DashboardFragment : Fragment() {
             flow {
                 while (isScanning) {
                     emit(Unit)
-                    delay(500) // Emit every 500 milliseconds
+                    delay(500) // Update every 500 milliseconds
                 }
-            }.conflate() // In case processing takes longer than 500ms
+            }.conflate()
                 .collect {
                     val currentTime = System.currentTimeMillis()
                     val formattedTime = dateFormat.format(Date(currentTime))
@@ -83,8 +81,11 @@ class DashboardFragment : Fragment() {
                     val detection = Detection(formattedTime, latestDevices)
 
                     withContext(Dispatchers.Main) {
+                        tvDeviceCount.text = latestDevices.size.toString()
+                        tvTimestamp.text = formattedTime
+
                         detections.add(0, detection)
-                        if (detections.size > 10) {
+                        if (detections.size > 5) {
                             detections.removeAt(detections.lastIndex)
                         }
                         detectionAdapter.updateDetections(detections)
@@ -135,5 +136,3 @@ class DashboardFragment : Fragment() {
         super.onDestroy()
     }
 }
-
-data class Detection(val timestamp: String, val devices: List<BluetoothDeviceWrapper>)

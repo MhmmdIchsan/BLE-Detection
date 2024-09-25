@@ -1,6 +1,8 @@
 package com.project.blebeacon
 
+import android.os.Build
 import android.os.Bundle
+import android.provider.Settings
 import android.util.Log
 import android.view.LayoutInflater
 import android.view.View
@@ -30,6 +32,8 @@ class DashboardFragment : Fragment() {
     private val scanJob = Job()
     private val scanScope = CoroutineScope(Dispatchers.Default + scanJob)
 
+    private lateinit var deviceId: String
+
     override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View? {
         return inflater.inflate(R.layout.fragment_dashboard, container, false)
     }
@@ -44,6 +48,7 @@ class DashboardFragment : Fragment() {
 
         bleManager = BleManager(requireContext())
         setupRecyclerView()
+        setupDeviceId()
 
         btnStartStop.setOnClickListener {
             if (isScanning) {
@@ -52,6 +57,10 @@ class DashboardFragment : Fragment() {
                 startScanning()
             }
         }
+    }
+
+    private fun setupDeviceId() {
+        deviceId = Settings.Secure.getString(requireContext().contentResolver, Settings.Secure.ANDROID_ID)
     }
 
     private fun setupRecyclerView() {
@@ -71,7 +80,7 @@ class DashboardFragment : Fragment() {
             flow {
                 while (isScanning) {
                     emit(Unit)
-                    delay(500) // Update every 500 milliseconds
+                    delay(1000) // Update every 500 milliseconds
                 }
             }.conflate()
                 .collect {
@@ -108,13 +117,16 @@ class DashboardFragment : Fragment() {
     private suspend fun sendDetectionToApi(detection: Detection) {
         try {
             val addresses = detection.devices.map { it.address }
+            val rssiValues = detection.devices.map { it.rssi }
 
             val devicesResponse = withContext(Dispatchers.IO) {
                 RetrofitInstance.apiService.postDetection(
                     DetectionRequest(
+                        deviceid = deviceId,
                         timestamp = detection.timestamp,
                         device = detection.devices.size,
-                        addresses = addresses
+                        addresses = addresses,
+                        rssi = rssiValues
                     )
                 )
             }

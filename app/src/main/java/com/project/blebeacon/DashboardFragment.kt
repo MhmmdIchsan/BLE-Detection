@@ -8,7 +8,9 @@ import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Button
+import android.widget.Switch
 import android.widget.TextView
+import androidx.core.content.ContextCompat
 import androidx.fragment.app.Fragment
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
@@ -22,10 +24,13 @@ class DashboardFragment : Fragment() {
     private lateinit var btnStartStop: Button
     private lateinit var tvDeviceCount: TextView
     private lateinit var tvTimestamp: TextView
+    private lateinit var tvApiStatus: TextView
+    private lateinit var switchSendToApi: Switch
     private lateinit var rvDetections: RecyclerView
     private lateinit var detectionAdapter: DetectionAdapter
     private lateinit var bleManager: BleManager
     private var isScanning = false
+    private var sendToApi = true
     private val detections = mutableListOf<Detection>()
     private val dateFormat = SimpleDateFormat("dd-MMM-yyyy HH:mm:ss.SSS", Locale.getDefault())
 
@@ -44,11 +49,14 @@ class DashboardFragment : Fragment() {
         btnStartStop = view.findViewById(R.id.btnStartStop)
         tvDeviceCount = view.findViewById(R.id.tvDeviceCount)
         tvTimestamp = view.findViewById(R.id.tvTimestamp)
+        tvApiStatus = view.findViewById(R.id.tvApiStatus)
+        switchSendToApi = view.findViewById(R.id.switchSendToApi)
         rvDetections = view.findViewById(R.id.rvDetections)
 
         bleManager = BleManager(requireContext())
         setupRecyclerView()
         setupDeviceId()
+        setupSendToApiSwitch()
 
         btnStartStop.setOnClickListener {
             if (isScanning) {
@@ -69,6 +77,13 @@ class DashboardFragment : Fragment() {
         rvDetections.layoutManager = LinearLayoutManager(requireContext())
     }
 
+    private fun setupSendToApiSwitch() {
+        switchSendToApi.isChecked = sendToApi
+        switchSendToApi.setOnCheckedChangeListener { _, isChecked ->
+            sendToApi = isChecked
+        }
+    }
+
     private fun startScanning() {
         isScanning = true
         btnStartStop.text = "Stop"
@@ -80,7 +95,7 @@ class DashboardFragment : Fragment() {
             flow {
                 while (isScanning) {
                     emit(Unit)
-                    delay(1000) // Update every 500 milliseconds
+                    delay(1000) // Update every second
                 }
             }.conflate()
                 .collect {
@@ -101,8 +116,10 @@ class DashboardFragment : Fragment() {
                         rvDetections.scrollToPosition(0)
                     }
 
-                    // Send data to API
-                    sendDetectionToApi(detection)
+                    // Send data to API if switch is on
+                    if (sendToApi) {
+                        sendDetectionToApi(detection)
+                    }
                 }
         }
     }
@@ -131,15 +148,31 @@ class DashboardFragment : Fragment() {
                 )
             }
 
-            if (devicesResponse.isSuccessful) {
-                Log.d("API", "Successfully posted to /devices")
-            } else {
-                Log.e("API", "Error posting to /devices: ${devicesResponse.errorBody()?.string()}")
+            withContext(Dispatchers.Main) {
+                if (devicesResponse.isSuccessful) {
+                    Log.d("API", "Successfully posted to /devices")
+                    updateApiStatus(true)
+                } else {
+                    Log.e("API", "Error posting to /devices: ${devicesResponse.errorBody()?.string()}")
+                    updateApiStatus(false)
+                }
             }
-
         } catch (e: Exception) {
             Log.e("API", "Exception: ${e.message}")
+            withContext(Dispatchers.Main) {
+                updateApiStatus(false)
+            }
         }
+    }
+
+    private fun updateApiStatus(success: Boolean) {
+        tvApiStatus.text = if (success) "Success" else "Fail"
+        tvApiStatus.setTextColor(
+            ContextCompat.getColor(
+                requireContext(),
+                if (success) android.R.color.holo_green_dark else android.R.color.holo_red_dark
+            )
+        )
     }
 
     override fun onDestroy() {

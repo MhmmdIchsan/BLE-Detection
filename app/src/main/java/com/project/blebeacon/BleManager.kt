@@ -48,6 +48,7 @@ class BleManager(private val context: Context) {
     private var cleanupJob: Job? = null
     private val inactivityThreshold = 3000L // 3 seconds
     private val dateFormat = SimpleDateFormat("HH:mm:ss.SSS", Locale.getDefault())
+    private var scanRestartJob: Job? = null
 
     fun startScanning() {
         if (!hasBluetoothPermission()) {
@@ -66,6 +67,7 @@ class BleManager(private val context: Context) {
             isScanning = true
             Log.d("BLE", "Started continuous scanning for BLE devices")
             startPeriodicCleanup()
+            startPeriodicScanRestart()
         } catch (e: SecurityException) {
             Log.e("BLE", "SecurityException when starting scan: ${e.message}")
         }
@@ -78,10 +80,28 @@ class BleManager(private val context: Context) {
             bluetoothLeScanner?.stopScan(scanCallback)
             isScanning = false
             stopPeriodicCleanup()
+            stopPeriodicScanRestart()
             Log.d("BLE", "Stopped scanning")
         } catch (e: SecurityException) {
             Log.e("BLE", "SecurityException when stopping scan: ${e.message}")
         }
+    }
+
+    private fun startPeriodicScanRestart() {
+        scanRestartJob = coroutineScope.launch {
+            while (isActive) {
+                delay(5 * 60 * 1000) // 5 minutes
+                Log.d("BLE", "Performing periodic scan restart")
+                stopScanning()
+                delay(1000) // Wait for 1 second
+                startScanning()
+            }
+        }
+    }
+
+    private fun stopPeriodicScanRestart() {
+        scanRestartJob?.cancel()
+        scanRestartJob = null
     }
 
     private fun startPeriodicCleanup() {

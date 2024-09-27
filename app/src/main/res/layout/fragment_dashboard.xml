@@ -8,7 +8,7 @@
     <androidx.cardview.widget.CardView
         android:id="@+id/cardDeviceCount"
         android:layout_width="0dp"
-        android:layout_height="175dp"
+        android:layout_height="180dp"
         android:layout_marginEnd="8dp"
         app:cardCornerRadius="8dp"
         app:cardElevation="4dp"
@@ -49,7 +49,7 @@
     <androidx.cardview.widget.CardView
         android:id="@+id/cardTimestamp"
         android:layout_width="0dp"
-        android:layout_height="175dp"
+        android:layout_height="180dp"
         android:layout_marginStart="8dp"
         app:cardCornerRadius="8dp"
         app:cardElevation="4dp"

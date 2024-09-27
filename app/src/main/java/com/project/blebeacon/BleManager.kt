@@ -32,6 +32,7 @@ class BleManager(private val context: Context) {
     private val bluetoothManager: BluetoothManager = context.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
     private val bluetoothAdapter: BluetoothAdapter? = bluetoothManager.adapter
     private val bluetoothLeScanner: BluetoothLeScanner? = bluetoothAdapter?.bluetoothLeScanner
+    private var scanRestartCallback: (() -> Unit)? = null
 
     private val _scannedDevices = MutableStateFlow<List<BluetoothDeviceWrapper>>(emptyList())
     val scannedDevices: StateFlow<List<BluetoothDeviceWrapper>> = _scannedDevices
@@ -50,13 +51,18 @@ class BleManager(private val context: Context) {
     private val dateFormat = SimpleDateFormat("HH:mm:ss.SSS", Locale.getDefault())
     private var scanRestartJob: Job? = null
 
+    fun setScanRestartCallback(callback: () -> Unit) {
+        scanRestartCallback = callback
+    }
+
     fun startScanning() {
         if (!hasBluetoothPermission()) {
             Log.e("BLE", "Bluetooth permission not granted")
             return
         }
 
-        if (isScanning) return
+        stopScanning() // Ensure we stop any ongoing scan
+        clearScannedDevices() // Clear existing devices
 
         val scanSettings = ScanSettings.Builder()
             .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
@@ -68,9 +74,14 @@ class BleManager(private val context: Context) {
             Log.d("BLE", "Started continuous scanning for BLE devices")
             startPeriodicCleanup()
             startPeriodicScanRestart()
+            scanRestartCallback?.invoke() // Notify that scan has restarted
         } catch (e: SecurityException) {
             Log.e("BLE", "SecurityException when starting scan: ${e.message}")
         }
+    }
+
+    fun clearScannedDevices() {
+        _scannedDevices.value = emptyList()
     }
 
     fun stopScanning() {
@@ -90,11 +101,9 @@ class BleManager(private val context: Context) {
     private fun startPeriodicScanRestart() {
         scanRestartJob = coroutineScope.launch {
             while (isActive) {
-                delay(5 * 60 * 1000) // 5 minutes
+                delay(15 * 60 * 1000) // 15 minutes
                 Log.d("BLE", "Performing periodic scan restart")
-                stopScanning()
-                delay(1000) // Wait for 1 second
-                startScanning()
+                startScanning() // This will stop the current scan, clear devices, and start a new scan
             }
         }
     }

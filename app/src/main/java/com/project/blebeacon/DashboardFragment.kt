@@ -1,6 +1,6 @@
 package com.project.blebeacon
 
-import android.os.Build
+import android.app.AlertDialog
 import android.os.Bundle
 import android.provider.Settings
 import android.util.Log
@@ -30,13 +30,13 @@ class DashboardFragment : Fragment() {
     private lateinit var detectionAdapter: DetectionAdapter
     private lateinit var bleManager: BleManager
     private var isScanning = false
-    private var sendToApi = true
+    private var sendToApi = false
     private val detections = mutableListOf<Detection>()
     private val dateFormat = SimpleDateFormat("dd-MMM-yyyy HH:mm:ss.SSS", Locale.getDefault())
 
-    private val scanJob = Job()
-    private val scanScope = CoroutineScope(Dispatchers.Default + scanJob)
-
+    private var scanJob: Job? = null
+    private val scanScope = CoroutineScope(Dispatchers.Default)
+    private var lastScanRestartTime: Long = 0
     private lateinit var deviceId: String
 
     override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View? {
@@ -58,9 +58,21 @@ class DashboardFragment : Fragment() {
         setupDeviceId()
         setupSendToApiSwitch()
 
+        bleManager.setScanRestartCallback {
+            scanScope.launch {
+                withContext(Dispatchers.Main) {
+                    lastScanRestartTime = System.currentTimeMillis()
+                    detections.clear()
+                    detectionAdapter.updateDetections(detections)
+                    tvDeviceCount.text = "0"
+                    tvTimestamp.text = ""
+                }
+            }
+        }
+
         btnStartStop.setOnClickListener {
             if (isScanning) {
-                stopScanning()
+                showStopScanningConfirmation()
             } else {
                 startScanning()
             }
@@ -89,46 +101,63 @@ class DashboardFragment : Fragment() {
         btnStartStop.text = "Stop"
         detections.clear()
         detectionAdapter.updateDetections(detections)
+        lastScanRestartTime = System.currentTimeMillis()
         bleManager.startScanning()
 
-        scanScope.launch {
+        scanJob = scanScope.launch {
             flow {
-                while (isScanning) {
+                while (currentCoroutineContext().isActive) {
                     emit(Unit)
                     delay(1000) // Update every second
                 }
-            }.conflate()
+            }
+                .cancellable()
+                .conflate()
                 .collect {
                     val currentTime = System.currentTimeMillis()
-                    val formattedTime = dateFormat.format(Date(currentTime))
                     val latestDevices = bleManager.scannedDevices.value
-                    val detection = Detection(formattedTime, latestDevices)
 
-                    withContext(Dispatchers.Main) {
-                        tvDeviceCount.text = latestDevices.size.toString()
-                        tvTimestamp.text = formattedTime
+                    // Only process data that's newer than the last scan restart
+                    if (latestDevices.isNotEmpty() && latestDevices.all { it.lastSeenTimestamp > lastScanRestartTime }) {
+                        val formattedTime = dateFormat.format(Date(currentTime))
+                        val detection = Detection(formattedTime, latestDevices)
 
-                        detections.add(0, detection)
-                        if (detections.size > 5) {
-                            detections.removeAt(detections.lastIndex)
+                        withContext(Dispatchers.Main) {
+                            tvDeviceCount.text = latestDevices.size.toString()
+                            tvTimestamp.text = formattedTime
+
+                            detections.add(0, detection)
+                            if (detections.size > 5) {
+                                detections.removeAt(detections.lastIndex)
+                            }
+                            detectionAdapter.updateDetections(detections)
+                            rvDetections.scrollToPosition(0)
                         }
-                        detectionAdapter.updateDetections(detections)
-                        rvDetections.scrollToPosition(0)
-                    }
 
-                    // Send data to API if switch is on
-                    if (sendToApi) {
-                        sendDetectionToApi(detection)
+                        // Send data to API if switch is on
+                        if (sendToApi) {
+                            sendDetectionToApi(detection)
+                        }
                     }
                 }
         }
+    }
+
+    private fun showStopScanningConfirmation() {
+        AlertDialog.Builder(requireContext())
+            .setTitle("Stop Scanning")
+            .setMessage("Are you sure you want to stop scanning?")
+            .setPositiveButton("Yes") { _, _ -> stopScanning() }
+            .setNegativeButton("No", null)
+            .show()
     }
 
     private fun stopScanning() {
         isScanning = false
         btnStartStop.text = "Start"
         bleManager.stopScanning()
-        scanJob.cancel()
+        scanJob?.cancel()
+        scanJob = null
     }
 
     private suspend fun sendDetectionToApi(detection: Detection) {
@@ -177,7 +206,8 @@ class DashboardFragment : Fragment() {
 
     override fun onDestroy() {
         stopScanning()
-        scanJob.cancel()
+        scanJob?.cancel()
+        scanScope.cancel()
         super.onDestroy()
     }
 }

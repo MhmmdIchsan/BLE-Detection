@@ -3,6 +3,7 @@ package com.project.blebeacon
 import android.graphics.Color
 import androidx.appcompat.app.AppCompatActivity
 import android.os.Bundle
+import android.view.WindowManager
 import androidx.appcompat.widget.Toolbar // Make sure to import this
 import androidx.navigation.NavController
 import androidx.navigation.fragment.NavHostFragment
@@ -19,6 +20,7 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
+        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         window.statusBarColor = Color.BLACK
         // Find the Toolbar and set it as the ActionBar
         val toolbar: Toolbar = findViewById(R.id.toolbar)

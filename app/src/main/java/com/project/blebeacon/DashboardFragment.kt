@@ -32,12 +32,17 @@ class DashboardFragment : Fragment() {
     private var isScanning = false
     private var sendToApi = false
     private val detections = mutableListOf<Detection>()
+    private val maxDetections = 5 // Set a maximum number of detections to keep
     private val dateFormat = SimpleDateFormat("dd-MMM-yyyy HH:mm:ss.SSS", Locale.getDefault())
-
     private var scanJob: Job? = null
     private val scanScope = CoroutineScope(Dispatchers.Default)
     private var lastScanRestartTime: Long = 0
     private lateinit var deviceId: String
+    private val deviceHistory = mutableMapOf<String, MutableList<Pair<Long, Int>>>()
+    private val processedDevices = mutableListOf<BluetoothDeviceWrapper>()
+    private val lastSeenTime = mutableMapOf<String, Long>()
+    private val deviceDisappearanceThreshold = 2000 // 5 seconds
+    private val rssiThreshold = 5 // Threshold Dbm baru
 
     override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View? {
         return inflater.inflate(R.layout.fragment_dashboard, container, false)
@@ -99,8 +104,8 @@ class DashboardFragment : Fragment() {
     private fun startScanning() {
         isScanning = true
         btnStartStop.text = "Stop"
-        detections.clear()
-        detectionAdapter.updateDetections(detections)
+        processedDevices.clear()
+        deviceHistory.clear()
         lastScanRestartTime = System.currentTimeMillis()
         bleManager.startScanning()
 
@@ -117,17 +122,26 @@ class DashboardFragment : Fragment() {
                     val currentTime = System.currentTimeMillis()
                     val latestDevices = bleManager.scannedDevices.value
 
-                    // Only process data that's newer than the last scan restart
-                    if (latestDevices.isNotEmpty() && latestDevices.all { it.lastSeenTimestamp > lastScanRestartTime }) {
+                    // Process and filter devices
+                    processDevices(latestDevices, currentTime)
+
+                    if (processedDevices.isNotEmpty()) {
                         val formattedTime = dateFormat.format(Date(currentTime))
-                        val detection = Detection(formattedTime, latestDevices)
+                        val detection = Detection(formattedTime, processedDevices.toList())
+
+//                        // Log the processed device data
+//                        Log.d("ProcessedDevices", "Timestamp: $formattedTime, Devices: ${
+//                            processedDevices.joinToString(", ") {
+//                                "Address: ${it.address}, Name: ${it.name}, RSSI: ${it.rssi}"
+//                            }
+//                        }")
 
                         withContext(Dispatchers.Main) {
-                            tvDeviceCount.text = latestDevices.size.toString()
+                            tvDeviceCount.text = processedDevices.size.toString()
                             tvTimestamp.text = formattedTime
 
                             detections.add(0, detection)
-                            if (detections.size > 5) {
+                            if (detections.size > maxDetections) {
                                 detections.removeAt(detections.lastIndex)
                             }
                             detectionAdapter.updateDetections(detections)
@@ -141,6 +155,54 @@ class DashboardFragment : Fragment() {
                     }
                 }
         }
+    }
+
+    private fun processDevices(devices: List<BluetoothDeviceWrapper>, currentTime: Long) {
+        val devicesToRemove = mutableListOf<String>()
+
+        for (device in devices) {
+            val history = deviceHistory.getOrPut(device.address) { mutableListOf() }
+            history.add(Pair(currentTime, device.rssi))
+
+            // Simpan hanya riwayat 5 detik terakhir
+            val fiveSecondsAgo = currentTime - 2000
+            deviceHistory[device.address] = history.filter { it.first >= fiveSecondsAgo }.toMutableList()
+
+            // Perbarui waktu terakhir terlihat
+            lastSeenTime[device.address] = currentTime
+
+            // Periksa apakah perangkat telah bergerak
+            if (hasDeviceMoved(history)) {
+                val existingIndex = processedDevices.indexOfFirst { it.address == device.address }
+                if (existingIndex != -1) {
+                    processedDevices[existingIndex] = device
+                } else {
+                    processedDevices.add(device)
+                }
+            } else {
+                devicesToRemove.add(device.address)
+            }
+        }
+
+        // Hapus perangkat yang tidak bergerak
+        processedDevices.removeAll { it.address in devicesToRemove }
+
+        // Hapus perangkat yang tidak terlihat baru-baru ini
+        processedDevices.removeAll { device ->
+            val lastSeen = lastSeenTime[device.address] ?: 0L
+            currentTime - lastSeen > deviceDisappearanceThreshold
+        }
+    }
+
+    private fun hasDeviceMoved(history: List<Pair<Long, Int>>): Boolean {
+        if (history.size < 1) return false
+        val rssiValues = history.map { it.second }
+        for (i in 1 until rssiValues.size) {
+            if (Math.abs(rssiValues[i] - rssiValues[i-1]) >= rssiThreshold) {
+                return true
+            }
+        }
+        return false
     }
 
     private fun showStopScanningConfirmation() {

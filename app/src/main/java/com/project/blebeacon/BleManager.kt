@@ -61,8 +61,8 @@ class BleManager(private val context: Context) {
             return
         }
 
-        stopScanning() // Ensure we stop any ongoing scan
-        clearScannedDevices() // Clear existing devices
+        stopScanning()
+        clearScannedDevices()
 
         val scanSettings = ScanSettings.Builder()
             .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
@@ -74,7 +74,7 @@ class BleManager(private val context: Context) {
             Log.d("BLE", "Started continuous scanning for BLE devices")
             startPeriodicCleanup()
             startPeriodicScanRestart()
-            scanRestartCallback?.invoke() // Notify that scan has restarted
+            scanRestartCallback?.invoke()
         } catch (e: SecurityException) {
             Log.e("BLE", "SecurityException when starting scan: ${e.message}")
         }

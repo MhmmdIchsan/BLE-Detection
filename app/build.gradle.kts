@@ -1,7 +1,19 @@
+import java.util.Properties
+import java.io.FileInputStream
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.jetbrains.kotlin.android)
 }
+
+// Load local.properties file
+val localProperties = Properties()
+val localPropertiesFile = rootProject.file("local.properties")
+if (localPropertiesFile.exists()) {
+    localProperties.load(FileInputStream(localPropertiesFile))
+}
+
+val apiBaseUrl = localProperties.getProperty("API_BASE_URL")
 
 android {
     namespace = "com.project.blebeacon"
@@ -14,11 +26,14 @@ android {
         versionCode = 1
         versionName = "1.0"
 
+        // api url
+        buildConfigField("String", "BASE_URL", "\"${apiBaseUrl}\"")
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
     buildFeatures {
         viewBinding = true
+        buildConfig = true
     }
 
     buildTypes {

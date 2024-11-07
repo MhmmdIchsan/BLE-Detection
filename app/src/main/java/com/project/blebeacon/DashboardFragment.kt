@@ -1,6 +1,10 @@
 package com.project.blebeacon
 
+import android.app.ActivityManager
 import android.app.AlertDialog
+import android.content.Context
+import android.content.Intent
+import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import android.util.Log
@@ -18,9 +22,15 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 import java.text.SimpleDateFormat
 import java.util.*
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.collect
 
 class DashboardFragment : Fragment() {
-
+    private var stateCollectionJob: Job? = null
+    private var serviceIntent: Intent? = null
     private lateinit var btnStartStop: Button
     private lateinit var tvDeviceCount: TextView
     private lateinit var tvTimestamp: TextView
@@ -33,7 +43,7 @@ class DashboardFragment : Fragment() {
     private var sendToApi = false
     private val detections = mutableListOf<Detection>()
     private val maxDetections = 5 // Set a maximum number of detections to keep
-    private val dateFormat = SimpleDateFormat("dd-MMM-yyyy HH:mm:ss.SSS", Locale.getDefault())
+    private val dateFormat = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSSSSS", Locale.getDefault())
     private var scanJob: Job? = null
     private val scanScope = CoroutineScope(Dispatchers.Default)
     private var lastScanRestartTime: Long = 0
@@ -46,6 +56,12 @@ class DashboardFragment : Fragment() {
 
     override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View? {
         return inflater.inflate(R.layout.fragment_dashboard, container, false)
+    }
+
+    private fun isServiceRunning(): Boolean {
+        val manager = requireContext().getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+        return manager.getRunningServices(Integer.MAX_VALUE)
+            .any { it.service.className == BleBackgroundService::class.java.name }
     }
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
@@ -74,12 +90,28 @@ class DashboardFragment : Fragment() {
                 }
             }
         }
+        isScanning = isServiceRunning()
+        updateScanButtonState()
 
         btnStartStop.setOnClickListener {
             if (isScanning) {
                 showStopScanningConfirmation()
             } else {
                 startScanning()
+            }
+        }
+        startCollectingState()
+    }
+
+    private fun updateScanButtonState() {
+        btnStartStop.text = if (isScanning) "Stop" else "Start"
+    }
+    private fun startCollectingState() {
+        stateCollectionJob = viewLifecycleOwner.lifecycleScope.launch {
+            viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
+                BleSharedState.detectionFlow.collect { detection ->
+                    updateUI(detection)
+                }
             }
         }
     }
@@ -103,57 +135,14 @@ class DashboardFragment : Fragment() {
 
     private fun startScanning() {
         isScanning = true
-        btnStartStop.text = "Stop"
-        processedDevices.clear()
-        deviceHistory.clear()
-        lastScanRestartTime = System.currentTimeMillis()
-        bleManager.startScanning()
+        updateScanButtonState()
 
-        scanJob = scanScope.launch {
-            flow {
-                while (currentCoroutineContext().isActive) {
-                    emit(Unit)
-                    delay(1000) // Update every second
-                }
-            }
-                .cancellable()
-                .conflate()
-                .collect {
-                    val currentTime = System.currentTimeMillis()
-                    val latestDevices = bleManager.scannedDevices.value
-
-                    // Process and filter devices
-                    processDevices(latestDevices, currentTime)
-
-                    if (processedDevices.isNotEmpty()) {
-                        val formattedTime = dateFormat.format(Date(currentTime))
-                        val detection = Detection(formattedTime, processedDevices.toList())
-
-//                        // Log the processed device data
-//                        Log.d("ProcessedDevices", "Timestamp: $formattedTime, Devices: ${
-//                            processedDevices.joinToString(", ") {
-//                                "Address: ${it.address}, Name: ${it.name}, RSSI: ${it.rssi}"
-//                            }
-//                        }")
-
-                        withContext(Dispatchers.Main) {
-                            tvDeviceCount.text = processedDevices.size.toString()
-                            tvTimestamp.text = formattedTime
-
-                            detections.add(0, detection)
-                            if (detections.size > maxDetections) {
-                                detections.removeAt(detections.lastIndex)
-                            }
-                            detectionAdapter.updateDetections(detections)
-                            rvDetections.scrollToPosition(0)
-                        }
-
-                        // Send data to API if switch is on
-                        if (sendToApi) {
-                            sendDetectionToApi(detection)
-                        }
-                    }
-                }
+        // Start the background service
+        serviceIntent = Intent(requireContext(), BleBackgroundService::class.java)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            requireContext().startForegroundService(serviceIntent)
+        } else {
+            requireContext().startService(serviceIntent)
         }
     }
 
@@ -216,10 +205,36 @@ class DashboardFragment : Fragment() {
 
     private fun stopScanning() {
         isScanning = false
-        btnStartStop.text = "Start"
-        bleManager.stopScanning()
-        scanJob?.cancel()
-        scanJob = null
+        updateScanButtonState()
+
+        // Stop the background service
+        serviceIntent?.let { intent ->
+            requireContext().stopService(intent)
+        }
+
+        // Clear UI
+        tvDeviceCount.text = "0"
+        tvTimestamp.text = ""
+        detections.clear()
+        detectionAdapter.updateDetections(detections)
+    }
+
+    private fun updateUI(detection: Detection) {
+        tvDeviceCount.text = detection.devices.size.toString()
+        tvTimestamp.text = detection.timestamp
+
+        detections.add(0, detection)
+        if (detections.size > maxDetections) {
+            detections.removeAt(detections.lastIndex)
+        }
+        detectionAdapter.updateDetections(detections)
+        rvDetections.scrollToPosition(0)
+
+        // Update API status if needed
+        if (sendToApi) {
+            // You might want to handle API status updates differently
+            updateApiStatus(true)
+        }
     }
 
     private suspend fun sendDetectionToApi(detection: Detection) {
@@ -266,10 +281,15 @@ class DashboardFragment : Fragment() {
         )
     }
 
+    override fun onDestroyView() {
+        stateCollectionJob?.cancel()
+        super.onDestroyView()
+    }
+
     override fun onDestroy() {
+        super.onDestroy()
         stopScanning()
         scanJob?.cancel()
         scanScope.cancel()
-        super.onDestroy()
     }
 }

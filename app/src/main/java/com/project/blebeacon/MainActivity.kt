@@ -39,6 +39,16 @@ class MainActivity : AppCompatActivity() {
             requestPermissions(REQUIRED_PERMISSIONS, REQUEST_CODE_PERMISSIONS)
         }
 
+        // Check if the app was launched from boot completion
+        if (intent?.getBooleanExtra("AUTO_START_SCANNING", false) == true) {
+            // Find the DashboardFragment
+            val dashboardFragment = supportFragmentManager.findFragmentById(R.id.nav_host_fragment)
+                ?.childFragmentManager?.fragments?.firstOrNull { it is DashboardFragment } as? DashboardFragment
+
+            // Start scanning if fragment is available
+            dashboardFragment?.startScanning()
+        }
+
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         window.statusBarColor = Color.BLACK
         // Find the Toolbar and set it as the ActionBar

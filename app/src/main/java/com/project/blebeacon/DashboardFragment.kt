@@ -133,16 +133,18 @@ class DashboardFragment : Fragment() {
         }
     }
 
-    private fun startScanning() {
-        isScanning = true
-        updateScanButtonState()
+    fun startScanning() {
+        if (!isScanning) {
+            isScanning = true
+            updateScanButtonState()
 
-        // Start the background service
-        serviceIntent = Intent(requireContext(), BleBackgroundService::class.java)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            requireContext().startForegroundService(serviceIntent)
-        } else {
-            requireContext().startService(serviceIntent)
+            // Start the background service
+            serviceIntent = Intent(requireContext(), BleBackgroundService::class.java)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                requireContext().startForegroundService(serviceIntent)
+            } else {
+                requireContext().startService(serviceIntent)
+            }
         }
     }
 

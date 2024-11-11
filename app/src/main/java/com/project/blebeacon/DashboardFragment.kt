@@ -30,12 +30,13 @@ import kotlinx.coroutines.flow.collect
 
 class DashboardFragment : Fragment() {
     private var stateCollectionJob: Job? = null
+    private var apiStatusJob: Job? = null
     private var serviceIntent: Intent? = null
     private lateinit var btnStartStop: Button
     private lateinit var tvDeviceCount: TextView
     private lateinit var tvTimestamp: TextView
     private lateinit var tvApiStatus: TextView
-    private lateinit var switchSendToApi: Switch
+    private lateinit var tvDeviceId: TextView
     private lateinit var rvDetections: RecyclerView
     private lateinit var detectionAdapter: DetectionAdapter
     private lateinit var bleManager: BleManager
@@ -71,13 +72,12 @@ class DashboardFragment : Fragment() {
         tvDeviceCount = view.findViewById(R.id.tvDeviceCount)
         tvTimestamp = view.findViewById(R.id.tvTimestamp)
         tvApiStatus = view.findViewById(R.id.tvApiStatus)
-        switchSendToApi = view.findViewById(R.id.switchSendToApi)
+        tvDeviceId = view.findViewById(R.id.tvDeviceId)
         rvDetections = view.findViewById(R.id.rvDetections)
 
         bleManager = BleManager(requireContext())
         setupRecyclerView()
         setupDeviceId()
-        setupSendToApiSwitch()
 
         bleManager.setScanRestartCallback {
             scanScope.launch {
@@ -100,7 +100,30 @@ class DashboardFragment : Fragment() {
                 startScanning()
             }
         }
+        updateApiStatus(false)
+
+        startCollectingApiStatus()
         startCollectingState()
+
+        // Add scanning state observer
+        viewLifecycleOwner.lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                BleBackgroundService.scanningStateFlow.collect { isScanning ->
+                    this@DashboardFragment.isScanning = isScanning
+                    updateScanButtonState()
+                }
+            }
+        }
+    }
+
+    private fun startCollectingApiStatus() {
+        apiStatusJob = viewLifecycleOwner.lifecycleScope.launch {
+            viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
+                BleBackgroundService.apiStatusFlow.collect { isActive ->
+                    updateApiStatus(isActive)
+                }
+            }
+        }
     }
 
     private fun updateScanButtonState() {
@@ -118,19 +141,13 @@ class DashboardFragment : Fragment() {
 
     private fun setupDeviceId() {
         deviceId = Settings.Secure.getString(requireContext().contentResolver, Settings.Secure.ANDROID_ID)
+        tvDeviceId.text = deviceId
     }
 
     private fun setupRecyclerView() {
         detectionAdapter = DetectionAdapter()
         rvDetections.adapter = detectionAdapter
         rvDetections.layoutManager = LinearLayoutManager(requireContext())
-    }
-
-    private fun setupSendToApiSwitch() {
-        switchSendToApi.isChecked = sendToApi
-        switchSendToApi.setOnCheckedChangeListener { _, isChecked ->
-            sendToApi = isChecked
-        }
     }
 
     fun startScanning() {
@@ -209,7 +226,13 @@ class DashboardFragment : Fragment() {
         isScanning = false
         updateScanButtonState()
 
-        // Stop the background service
+        // Send explicit stop command to service
+        val stopIntent = Intent(requireContext(), BleBackgroundService::class.java).apply {
+            action = "STOP_SCANNING"
+        }
+        requireContext().startService(stopIntent)
+
+        // Then stop the service
         serviceIntent?.let { intent ->
             requireContext().stopService(intent)
         }
@@ -219,6 +242,9 @@ class DashboardFragment : Fragment() {
         tvTimestamp.text = ""
         detections.clear()
         detectionAdapter.updateDetections(detections)
+
+        // Reset API status
+        updateApiStatus(false)
     }
 
     private fun updateUI(detection: Detection) {
@@ -273,18 +299,19 @@ class DashboardFragment : Fragment() {
         }
     }
 
-    private fun updateApiStatus(success: Boolean) {
-        tvApiStatus.text = if (success) "Success" else "Fail"
+    private fun updateApiStatus(isActive: Boolean) {
+        tvApiStatus.text = if (isActive) "Active" else "Failed"
         tvApiStatus.setTextColor(
             ContextCompat.getColor(
                 requireContext(),
-                if (success) android.R.color.holo_green_dark else android.R.color.holo_red_dark
+                if (isActive) android.R.color.holo_green_dark else android.R.color.holo_red_dark
             )
         )
     }
 
     override fun onDestroyView() {
         stateCollectionJob?.cancel()
+        apiStatusJob?.cancel()
         super.onDestroyView()
     }
 

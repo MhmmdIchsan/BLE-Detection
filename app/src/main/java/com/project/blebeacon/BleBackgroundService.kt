@@ -1,4 +1,3 @@
-// BleBackgroundService.kt
 package com.project.blebeacon
 
 import android.app.*
@@ -27,6 +26,12 @@ class BleBackgroundService : Service() {
         private const val NOTIFICATION_ID = 123
         private const val CHANNEL_ID = "BleBeaconChannel"
         private const val CHANNEL_NAME = "BLE Beacon Scanner"
+
+        private val _apIStatusFlow = MutableStateFlow(false)
+        val apiStatusFlow: StateFlow<Boolean> = _apIStatusFlow.asStateFlow()
+
+        private val _scanningStateFlow = MutableStateFlow(false)
+        val scanningStateFlow: StateFlow<Boolean> = _scanningStateFlow.asStateFlow()
     }
 
     override fun onCreate() {
@@ -40,17 +45,25 @@ class BleBackgroundService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (intent?.action == "STOP_SCANNING") {
+            stopSelf()
+            return START_NOT_STICKY
+        }
+
         startForeground(NOTIFICATION_ID, createNotification("Scanning for BLE devices..."))
         startScanning()
-        return START_STICKY
+        _scanningStateFlow.value = true
+        return START_NOT_STICKY
     }
 
     private fun startScanning() {
+        if (scanJob?.isActive == true) return
+
         bleManager.startScanning()
 
         scanJob = serviceScope.launch {
             flow {
-                while (currentCoroutineContext().isActive) {
+                while (currentCoroutineContext().isActive && _scanningStateFlow.value) {
                     emit(Unit)
                     delay(1000)
                 }
@@ -62,27 +75,31 @@ class BleBackgroundService : Service() {
                     val latestDevices = bleManager.scannedDevices.value
                     processDevices(latestDevices, currentTime)
 
-                    // Update notification with current device count
-                    updateNotification("Scanning: ${processedDevices.size} devices found")
+                    // Create detection regardless of whether devices were found
+                    val detection = createDetection(currentTime)
 
-                    // Create and emit detection
-                    if (processedDevices.isNotEmpty()) {
-                        val detection = Detection(
-                            timestamp = java.text.SimpleDateFormat(
-                                "yyyy-MM-dd'T'HH:mm:ss.SSSSSS",
-                                java.util.Locale.getDefault()
-                            ).format(java.util.Date(currentTime)),
-                            devices = processedDevices.toList()
-                        )
+                    // Update notification with appropriate message
+                    updateNotification(if (processedDevices.isEmpty())
+                        "Scanning: No devices found"
+                    else
+                        "Scanning: ${processedDevices.size} devices found"
+                    )
 
-                        // Emit to shared state
-                        BleSharedState.emitDetection(detection)
-
-                        // Send to API if needed
-                        sendDetectionToApi(detection)
-                    }
+                    // Always emit detection and send to API, even when empty
+                    BleSharedState.emitDetection(detection)
+                    sendDetectionToApi(detection)
                 }
         }
+    }
+
+    private fun createDetection(currentTime: Long): Detection {
+        return Detection(
+            timestamp = java.text.SimpleDateFormat(
+                "yyyy-MM-dd'T'HH:mm:ss.SSSSSS",
+                java.util.Locale.getDefault()
+            ).format(java.util.Date(currentTime)),
+            devices = processedDevices.toList()
+        )
     }
 
     private fun processDevices(devices: List<BluetoothDeviceWrapper>, currentTime: Long) {
@@ -129,24 +146,35 @@ class BleBackgroundService : Service() {
 
     private suspend fun sendDetectionToApi(detection: Detection) {
         try {
-            val addresses = detection.devices.map { it.address }
-            val rssiValues = detection.devices.map { it.rssi }
-
             withContext(Dispatchers.IO) {
-                RetrofitInstance.apiService.postDetection(
+                val request = if (detection.devices.isEmpty()) {
+                    // Send null or empty lists when no devices are detected
+                    DetectionRequest(
+                        deviceid = deviceId,
+                        timestamp = detection.timestamp,
+                        device = 0,
+                        addresses = null,
+                        rssi = null
+                    )
+                } else {
                     DetectionRequest(
                         deviceid = deviceId,
                         timestamp = detection.timestamp,
                         device = detection.devices.size,
-                        addresses = addresses,
-                        rssi = rssiValues
+                        addresses = detection.devices.map { it.address },
+                        rssi = detection.devices.map { it.rssi }
                     )
-                )
+                }
+
+                val response = RetrofitInstance.apiService.postDetection(request)
+                _apIStatusFlow.emit(response.isSuccessful)
             }
         } catch (e: Exception) {
             e.printStackTrace()
+            _apIStatusFlow.emit(false)
         }
     }
+
 
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -195,6 +223,7 @@ class BleBackgroundService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {
+        _scanningStateFlow.value = false
         scanJob?.cancel()
         serviceScope.cancel()
         bleManager.stopScanning()

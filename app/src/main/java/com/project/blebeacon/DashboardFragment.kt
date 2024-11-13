@@ -165,43 +165,6 @@ class DashboardFragment : Fragment() {
         }
     }
 
-    private fun processDevices(devices: List<BluetoothDeviceWrapper>, currentTime: Long) {
-        val devicesToRemove = mutableListOf<String>()
-
-        for (device in devices) {
-            val history = deviceHistory.getOrPut(device.address) { mutableListOf() }
-            history.add(Pair(currentTime, device.rssi))
-
-            // Simpan hanya riwayat 5 detik terakhir
-            val fiveSecondsAgo = currentTime - 2000
-            deviceHistory[device.address] = history.filter { it.first >= fiveSecondsAgo }.toMutableList()
-
-            // Perbarui waktu terakhir terlihat
-            lastSeenTime[device.address] = currentTime
-
-            // Periksa apakah perangkat telah bergerak
-            if (hasDeviceMoved(history)) {
-                val existingIndex = processedDevices.indexOfFirst { it.address == device.address }
-                if (existingIndex != -1) {
-                    processedDevices[existingIndex] = device
-                } else {
-                    processedDevices.add(device)
-                }
-            } else {
-                devicesToRemove.add(device.address)
-            }
-        }
-
-        // Hapus perangkat yang tidak bergerak
-        processedDevices.removeAll { it.address in devicesToRemove }
-
-        // Hapus perangkat yang tidak terlihat baru-baru ini
-        processedDevices.removeAll { device ->
-            val lastSeen = lastSeenTime[device.address] ?: 0L
-            currentTime - lastSeen > deviceDisappearanceThreshold
-        }
-    }
-
     private fun hasDeviceMoved(history: List<Pair<Long, Int>>): Boolean {
         if (history.size < 1) return false
         val rssiValues = history.map { it.second }
@@ -262,40 +225,6 @@ class DashboardFragment : Fragment() {
         if (sendToApi) {
             // You might want to handle API status updates differently
             updateApiStatus(true)
-        }
-    }
-
-    private suspend fun sendDetectionToApi(detection: Detection) {
-        try {
-            val addresses = detection.devices.map { it.address }
-            val rssiValues = detection.devices.map { it.rssi }
-
-            val devicesResponse = withContext(Dispatchers.IO) {
-                RetrofitInstance.apiService.postDetection(
-                    DetectionRequest(
-                        deviceid = deviceId,
-                        timestamp = detection.timestamp,
-                        device = detection.devices.size,
-                        addresses = addresses,
-                        rssi = rssiValues
-                    )
-                )
-            }
-
-            withContext(Dispatchers.Main) {
-                if (devicesResponse.isSuccessful) {
-                    Log.d("API", "Successfully posted to /devices")
-                    updateApiStatus(true)
-                } else {
-                    Log.e("API", "Error posting to /devices: ${devicesResponse.errorBody()?.string()}")
-                    updateApiStatus(false)
-                }
-            }
-        } catch (e: Exception) {
-            Log.e("API", "Exception: ${e.message}")
-            withContext(Dispatchers.Main) {
-                updateApiStatus(false)
-            }
         }
     }
 

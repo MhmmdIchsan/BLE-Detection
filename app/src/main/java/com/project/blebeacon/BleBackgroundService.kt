@@ -22,6 +22,10 @@ class BleBackgroundService : Service() {
     private val deviceDisappearanceThreshold = 2000
     private val rssiThreshold = 5
 
+    private var isDetectionEnabled = true
+    private var samplingInterval = 1L // Default 30 seconds
+    private var configurationJob: Job? = null
+
     companion object {
         private const val NOTIFICATION_ID = 123
         private const val CHANNEL_ID = "BleBeaconChannel"
@@ -32,6 +36,9 @@ class BleBackgroundService : Service() {
 
         private val _scanningStateFlow = MutableStateFlow(false)
         val scanningStateFlow: StateFlow<Boolean> = _scanningStateFlow.asStateFlow()
+
+        private val _detectionConfigFlow = MutableStateFlow(DetectionConfig())
+        val detectionConfigFlow: StateFlow<DetectionConfig> = _detectionConfigFlow.asStateFlow()
     }
 
     override fun onCreate() {
@@ -42,7 +49,40 @@ class BleBackgroundService : Service() {
             android.provider.Settings.Secure.ANDROID_ID
         )
         createNotificationChannel()
+        startConfigurationMonitoring()
     }
+
+    private fun startConfigurationMonitoring() {
+        configurationJob = serviceScope.launch {
+            // Periodically fetch configuration from your API
+            while (isActive) {
+                try {
+                    val config = RetrofitInstance.apiService.getLocationInfo(deviceId).body()
+                    config?.let {
+                        _detectionConfigFlow.value = DetectionConfig(
+                            isEnabled = it.is_detection_enabled,
+                            samplingInterval = it.sampling_interval.toLong()
+                        )
+
+                        // Update local variables
+                        isDetectionEnabled = it.is_detection_enabled
+                        samplingInterval = it.sampling_interval.toLong()
+
+                        // Restart scanning with new configuration if needed
+                        if (isDetectionEnabled && _scanningStateFlow.value) {
+                            startScanning()
+                        } else if (!isDetectionEnabled && _scanningStateFlow.value) {
+                            stopScanning()
+                        }
+                    }
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+                delay(60000) // Check configuration every minute
+            }
+        }
+    }
+
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == "STOP_SCANNING") {
@@ -51,21 +91,30 @@ class BleBackgroundService : Service() {
         }
 
         startForeground(NOTIFICATION_ID, createNotification("Scanning for BLE devices..."))
-        startScanning()
-        _scanningStateFlow.value = true
+        if (isDetectionEnabled) {
+            startScanning()
+        }
         return START_NOT_STICKY
     }
 
+
     private fun startScanning() {
-        if (scanJob?.isActive == true) return
+        if (scanJob?.isActive == true) {
+            scanJob?.cancel()
+        }
+
+        if (!isDetectionEnabled) {
+            return
+        }
 
         bleManager.startScanning()
+        _scanningStateFlow.value = true
 
         scanJob = serviceScope.launch {
             flow {
                 while (currentCoroutineContext().isActive && _scanningStateFlow.value) {
                     emit(Unit)
-                    delay(1000)
+                    delay(samplingInterval * 1000) // Convert to milliseconds
                 }
             }
                 .cancellable()
@@ -75,21 +124,26 @@ class BleBackgroundService : Service() {
                     val latestDevices = bleManager.scannedDevices.value
                     processDevices(latestDevices, currentTime)
 
-                    // Create detection regardless of whether devices were found
-                    val detection = createDetection(currentTime)
+                    if (isDetectionEnabled) {
+                        val detection = createDetection(currentTime)
+                        updateNotification(if (processedDevices.isEmpty())
+                            "Scanning: No devices found"
+                        else
+                            "Scanning: ${processedDevices.size} devices found"
+                        )
 
-                    // Update notification with appropriate message
-                    updateNotification(if (processedDevices.isEmpty())
-                        "Scanning: No devices found"
-                    else
-                        "Scanning: ${processedDevices.size} devices found"
-                    )
-
-                    // Always emit detection and send to API, even when empty
-                    BleSharedState.emitDetection(detection)
-                    sendDetectionToApi(detection)
+                        BleSharedState.emitDetection(detection)
+                        sendDetectionToApi(detection)
+                    }
                 }
         }
+    }
+
+    private fun stopScanning() {
+        _scanningStateFlow.value = false
+        scanJob?.cancel()
+        bleManager.stopScanning()
+        updateNotification("Scanning stopped")
     }
 
     private fun createDetection(currentTime: Long): Detection {
@@ -148,13 +202,12 @@ class BleBackgroundService : Service() {
         try {
             withContext(Dispatchers.IO) {
                 val request = if (detection.devices.isEmpty()) {
-                    // Send null or empty lists when no devices are detected
                     DetectionRequest(
                         deviceid = deviceId,
                         timestamp = detection.timestamp,
                         device = 0,
-                        addresses = null,
-                        rssi = null
+                        addresses = listOf("null"),  // Explicitly send "null" as a string
+                        rssi = listOf(-999)           // Use a placeholder value if RSSI is needed as an integer
                     )
                 } else {
                     DetectionRequest(
@@ -225,6 +278,7 @@ class BleBackgroundService : Service() {
     override fun onDestroy() {
         _scanningStateFlow.value = false
         scanJob?.cancel()
+        configurationJob?.cancel()
         serviceScope.cancel()
         bleManager.stopScanning()
         super.onDestroy()

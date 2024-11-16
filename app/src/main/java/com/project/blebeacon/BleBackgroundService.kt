@@ -9,10 +9,13 @@ import androidx.core.app.NotificationCompat
 import kotlinx.coroutines.*
 import android.app.PendingIntent
 import android.graphics.Color
+import android.util.Log
 import kotlinx.coroutines.flow.*
+import org.json.JSONObject
 
 class BleBackgroundService : Service() {
     private lateinit var bleManager: BleManager
+    private lateinit var webSocketClient: WebSocketClient
     private val serviceScope = CoroutineScope(Dispatchers.Default + Job())
     private var scanJob: Job? = null
     private lateinit var deviceId: String
@@ -22,14 +25,16 @@ class BleBackgroundService : Service() {
     private val deviceDisappearanceThreshold = 2000
     private val rssiThreshold = 5
 
-    private var isDetectionEnabled = true
-    private var samplingInterval = 1L // Default 30 seconds
-    private var configurationJob: Job? = null
+    private var isDetectionEnabled = false
+    private var samplingInterval = 1L
 
     companion object {
         private const val NOTIFICATION_ID = 123
-        private const val CHANNEL_ID = "BleBeaconChannel"
-        private const val CHANNEL_NAME = "BLE Beacon Scanner"
+        private const val CHANNEL_ID = "BleDetectionChannel"
+        private const val CHANNEL_NAME = "BLE Device Scanner"
+
+        private val _webSocketStatusFlow = MutableStateFlow(false)
+        val webSocketStatusFlow: StateFlow<Boolean> = _webSocketStatusFlow.asStateFlow()
 
         private val _apIStatusFlow = MutableStateFlow(false)
         val apiStatusFlow: StateFlow<Boolean> = _apIStatusFlow.asStateFlow()
@@ -37,64 +42,131 @@ class BleBackgroundService : Service() {
         private val _scanningStateFlow = MutableStateFlow(false)
         val scanningStateFlow: StateFlow<Boolean> = _scanningStateFlow.asStateFlow()
 
-        private val _detectionConfigFlow = MutableStateFlow(DetectionConfig())
-        val detectionConfigFlow: StateFlow<DetectionConfig> = _detectionConfigFlow.asStateFlow()
+        private val _serviceRunning = MutableStateFlow(false)
+        val serviceRunning: StateFlow<Boolean> = _serviceRunning.asStateFlow()
     }
 
     override fun onCreate() {
         super.onCreate()
+        _serviceRunning.value = true
         bleManager = BleManager(this)
         deviceId = android.provider.Settings.Secure.getString(
             contentResolver,
             android.provider.Settings.Secure.ANDROID_ID
         )
         createNotificationChannel()
-        startConfigurationMonitoring()
+        initializeWebSocket()
+        fetchConfigurationFromServer(deviceId)
     }
 
-    private fun startConfigurationMonitoring() {
-        configurationJob = serviceScope.launch {
-            // Periodically fetch configuration from your API
-            while (isActive) {
-                try {
-                    val config = RetrofitInstance.apiService.getLocationInfo(deviceId).body()
-                    config?.let {
-                        _detectionConfigFlow.value = DetectionConfig(
-                            isEnabled = it.is_detection_enabled,
-                            samplingInterval = it.sampling_interval.toLong()
-                        )
+    private fun initializeWebSocket() {
+        webSocketClient = WebSocketClient(BuildConfig.WEBSOCKET_URL + "production?deviceid=$deviceId") { message ->
+            handleWebSocketMessage(message)
+        }.apply {
+            setOnConnectCallback {
+                Log.d("WebSocket", "Connected callback triggered")
+                serviceScope.launch {
+                    _webSocketStatusFlow.emit(true)
+                    Log.d("WebSocket", "Status updated to: connected")
+                }
+            }
+            setOnCloseCallback {
+                Log.d("WebSocket", "Closed callback triggered")
+                serviceScope.launch {
+                    _webSocketStatusFlow.emit(false)
+                    Log.d("WebSocket", "Status updated to: disconnected")
+                }
+            }
+            setOnErrorCallback {
+                Log.d("WebSocket", "Error callback triggered")
+                serviceScope.launch {
+                    _webSocketStatusFlow.emit(false)
+                    Log.d("WebSocket", "Status updated to: disconnected (error)")
+                }
+            }
+        }
 
-                        // Update local variables
-                        isDetectionEnabled = it.is_detection_enabled
-                        samplingInterval = it.sampling_interval.toLong()
+        // Start the WebSocket connection
+        webSocketClient.connect()
+    }
 
-                        // Restart scanning with new configuration if needed
-                        if (isDetectionEnabled && _scanningStateFlow.value) {
-                            startScanning()
-                        } else if (!isDetectionEnabled && _scanningStateFlow.value) {
-                            stopScanning()
+    private fun fetchConfigurationFromServer(deviceId: String) {
+        serviceScope.launch {
+            try {
+                val response = RetrofitInstance.apiService.getConfiguration(deviceId)
+                if (response.isSuccessful) {
+                    response.body()?.let { configResponse ->
+                        val configurationData = configResponse.data.firstOrNull()
+                        configurationData?.let { config ->
+                            isDetectionEnabled = config.is_detection_enabled
+                            samplingInterval = config.sampling_interval.toLong()
+
+                            Log.d("Configuration", "isDetectionEnabled: $isDetectionEnabled, samplingInterval: $samplingInterval")
+
+                            if (isDetectionEnabled) {
+                                startScanning()
+                            } else {
+                                stopScanning()
+                            }
+                        } ?: run {
+                            Log.e("Configuration", "No configuration data found.")
                         }
                     }
-                } catch (e: Exception) {
-                    e.printStackTrace()
+                } else {
+                    Log.e("Configuration", "Error: ${response.errorBody()?.string()}")
                 }
-                delay(60000) // Check configuration every minute
+            } catch (e: Exception) {
+                Log.e("Configuration", "Failed to fetch configuration", e)
+            }
+        }
+    }
+    private fun handleWebSocketMessage(message: String) {
+        Log.d("WebSocket", "Received message: $message")
+        val jsonObject = JSONObject(message)
+
+        // Periksa apakah ini adalah pembaruan konfigurasi
+        if (jsonObject.has("updates")) {
+            val updates = jsonObject.getJSONObject("updates")
+            isDetectionEnabled = updates.getBoolean("is_detection_enabled")
+            samplingInterval = updates.getLong("sampling_interval")
+
+            Log.d("WebSocket", "Updated Config - isDetectionEnabled: $isDetectionEnabled, samplingInterval: $samplingInterval")
+
+            // Terapkan logika untuk memulai atau menghentikan pemindaian
+            if (isDetectionEnabled) {
+                startScanning()
+            } else {
+                stopScanning()
             }
         }
     }
 
+    private fun updateConfigurationToServer() {
+        webSocketClient.sendMessage(
+            JSONObject()
+                .put("deviceid", deviceId)
+                .put("updates", JSONObject()
+                    .put("is_detection_enabled", isDetectionEnabled)
+                    .put("sampling_interval", samplingInterval)
+                ).toString()
+        )
+    }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (intent?.action == "STOP_SCANNING") {
-            stopSelf()
-            return START_NOT_STICKY
+        when (intent?.action) {
+            "STOP_SCANNING" -> {
+                stopSelf()
+                return START_NOT_STICKY
+            }
+            "START_SCANNING" -> {
+                startForeground(NOTIFICATION_ID, createNotification("Scanning for BLE devices..."))
+                if (isDetectionEnabled) {
+                    startScanning()
+                }
+            }
         }
 
-        startForeground(NOTIFICATION_ID, createNotification("Scanning for BLE devices..."))
-        if (isDetectionEnabled) {
-            startScanning()
-        }
-        return START_NOT_STICKY
+        return START_STICKY
     }
 
 
@@ -276,9 +348,9 @@ class BleBackgroundService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {
+        _serviceRunning.value = false
         _scanningStateFlow.value = false
         scanJob?.cancel()
-        configurationJob?.cancel()
         serviceScope.cancel()
         bleManager.stopScanning()
         super.onDestroy()

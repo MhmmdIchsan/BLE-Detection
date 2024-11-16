@@ -48,13 +48,16 @@ class BleBackgroundService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        createNotificationChannel()
+        startForeground(NOTIFICATION_ID, createNotification("Initializing BLE Scanner..."))
+
         _serviceRunning.value = true
         bleManager = BleManager(this)
         deviceId = android.provider.Settings.Secure.getString(
             contentResolver,
             android.provider.Settings.Secure.ANDROID_ID
         )
-        createNotificationChannel()
+
         initializeWebSocket()
         fetchConfigurationFromServer(deviceId)
     }
@@ -154,6 +157,8 @@ class BleBackgroundService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        startForeground(NOTIFICATION_ID, createNotification("Initializing BLE Scanner..."))
+
         when (intent?.action) {
             "STOP_SCANNING" -> {
                 stopSelf()

@@ -32,12 +32,13 @@ class DashboardFragment : Fragment() {
     private var stateCollectionJob: Job? = null
     private var apiStatusJob: Job? = null
     private var serviceIntent: Intent? = null
-    private lateinit var btnStartStop: Button
     private lateinit var tvDeviceCount: TextView
     private lateinit var tvTimestamp: TextView
     private lateinit var tvApiStatus: TextView
     private lateinit var tvDeviceId: TextView
     private lateinit var rvDetections: RecyclerView
+    private lateinit var tvWebSocketStatus: TextView
+    private lateinit var tvScanStatus: TextView
     private lateinit var detectionAdapter: DetectionAdapter
     private lateinit var bleManager: BleManager
     private var isScanning = false
@@ -60,19 +61,18 @@ class DashboardFragment : Fragment() {
     }
 
     private fun isServiceRunning(): Boolean {
-        val manager = requireContext().getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
-        return manager.getRunningServices(Integer.MAX_VALUE)
-            .any { it.service.className == BleBackgroundService::class.java.name }
+        return runBlocking { BleBackgroundService.serviceRunning.first() }
     }
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
 
-        btnStartStop = view.findViewById(R.id.btnStartStop)
         tvDeviceCount = view.findViewById(R.id.tvDeviceCount)
         tvTimestamp = view.findViewById(R.id.tvTimestamp)
         tvApiStatus = view.findViewById(R.id.tvApiStatus)
         tvDeviceId = view.findViewById(R.id.tvDeviceId)
+        tvWebSocketStatus = view.findViewById(R.id.tvWebSocketStatus)
+        tvScanStatus = view.findViewById(R.id.tvScanStatus)
         rvDetections = view.findViewById(R.id.rvDetections)
 
         bleManager = BleManager(requireContext())
@@ -90,29 +90,106 @@ class DashboardFragment : Fragment() {
                 }
             }
         }
+        updateWebSocketStatus(false)
+        // Start collecting all states
+        startCollectingStates()
+
         isScanning = isServiceRunning()
-        updateScanButtonState()
-
-        btnStartStop.setOnClickListener {
-            if (isScanning) {
-                showStopScanningConfirmation()
-            } else {
-                startScanning()
-            }
-        }
         updateApiStatus(false)
+        updateScanStatus(isScanning)
+    }
 
-        startCollectingApiStatus()
-        startCollectingState()
-
-        // Add scanning state observer
+    private fun startCollectingStates() {
         viewLifecycleOwner.lifecycleScope.launch {
-            repeatOnLifecycle(Lifecycle.State.STARTED) {
-                BleBackgroundService.scanningStateFlow.collect { isScanning ->
-                    this@DashboardFragment.isScanning = isScanning
-                    updateScanButtonState()
+            // Collect WebSocket status
+            launch {
+                repeatOnLifecycle(Lifecycle.State.STARTED) {
+                    BleBackgroundService.webSocketStatusFlow
+                        .onEach { isConnected ->
+                            Log.d("DashboardFragment", "WebSocket status update: $isConnected")
+                        }
+                        .collect { isConnected ->
+                            withContext(Dispatchers.Main) {
+                                updateWebSocketStatus(isConnected)
+                            }
+                        }
                 }
             }
+
+            // Collect scanning status
+            launch {
+                repeatOnLifecycle(Lifecycle.State.STARTED) {
+                    BleBackgroundService.scanningStateFlow.collect { isScanning ->
+                        withContext(Dispatchers.Main) {
+                            this@DashboardFragment.isScanning = isScanning
+                            updateScanStatus(isScanning)
+                        }
+                    }
+                }
+            }
+
+            // Collect API status
+            launch {
+                repeatOnLifecycle(Lifecycle.State.STARTED) {
+                    BleBackgroundService.apiStatusFlow.collect { isActive ->
+                        withContext(Dispatchers.Main) {
+                            updateApiStatus(isActive)
+                        }
+                    }
+                }
+            }
+
+            // Collect detection updates
+            launch {
+                repeatOnLifecycle(Lifecycle.State.STARTED) {
+                    BleSharedState.detectionFlow.collect { detection ->
+                        withContext(Dispatchers.Main) {
+                            updateUI(detection)
+                        }
+                    }
+                }
+            }
+
+            // Collect service running status
+            launch {
+                repeatOnLifecycle(Lifecycle.State.STARTED) {
+                    BleBackgroundService.serviceRunning.collect { isRunning ->
+                        if (!isRunning && isScanning) {
+                            // Service was killed, restart it
+                            startScanning()
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private fun updateScanStatus(isScanning: Boolean) {
+        tvScanStatus.text = if (isScanning) "Started" else "Not Started"
+        tvScanStatus.setTextColor(
+            ContextCompat.getColor(
+                requireContext(),
+                if (isScanning) android.R.color.holo_green_dark else android.R.color.holo_red_dark
+            )
+        )
+    }
+
+    private fun updateWebSocketStatus(isConnected: Boolean) {
+        try {
+            if (!isAdded) return  // Check if fragment is attached to activity
+
+            tvWebSocketStatus?.let { textView ->
+                textView.text = if (isConnected) "Connected" else "Disconnected"
+                textView.setTextColor(
+                    ContextCompat.getColor(
+                        requireContext(),
+                        if (isConnected) android.R.color.holo_green_dark else android.R.color.holo_red_dark
+                    )
+                )
+                Log.d("DashboardFragment", "WebSocket UI updated: ${textView.text}")
+            }
+        } catch (e: Exception) {
+            Log.e("DashboardFragment", "Error updating WebSocket status", e)
         }
     }
 
@@ -126,9 +203,6 @@ class DashboardFragment : Fragment() {
         }
     }
 
-    private fun updateScanButtonState() {
-        btnStartStop.text = if (isScanning) "Stop" else "Start"
-    }
     private fun startCollectingState() {
         stateCollectionJob = viewLifecycleOwner.lifecycleScope.launch {
             viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
@@ -153,10 +227,12 @@ class DashboardFragment : Fragment() {
     fun startScanning() {
         if (!isScanning) {
             isScanning = true
-            updateScanButtonState()
 
-            // Start the background service
-            serviceIntent = Intent(requireContext(), BleBackgroundService::class.java)
+            // Start the background service with explicit action
+            serviceIntent = Intent(requireContext(), BleBackgroundService::class.java).apply {
+                action = "START_SCANNING"
+            }
+
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 requireContext().startForegroundService(serviceIntent)
             } else {
@@ -187,7 +263,6 @@ class DashboardFragment : Fragment() {
 
     private fun stopScanning() {
         isScanning = false
-        updateScanButtonState()
 
         // Send explicit stop command to service
         val stopIntent = Intent(requireContext(), BleBackgroundService::class.java).apply {
@@ -195,18 +270,11 @@ class DashboardFragment : Fragment() {
         }
         requireContext().startService(stopIntent)
 
-        // Then stop the service
-        serviceIntent?.let { intent ->
-            requireContext().stopService(intent)
-        }
-
         // Clear UI
         tvDeviceCount.text = "0"
         tvTimestamp.text = ""
         detections.clear()
         detectionAdapter.updateDetections(detections)
-
-        // Reset API status
         updateApiStatus(false)
     }
 

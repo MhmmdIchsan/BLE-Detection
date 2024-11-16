@@ -15,6 +15,8 @@ import com.project.blebeacon.R
 import android.Manifest
 import android.content.pm.PackageManager
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.launch
 
 class MainActivity : AppCompatActivity() {
     private lateinit var navController: NavController
@@ -66,10 +68,25 @@ class MainActivity : AppCompatActivity() {
                 R.id.navigation_scanner, R.id.navigation_dashboard, R.id.navigation_settings
             )
         )
-
         // Setup the ActionBar with NavController and AppBarConfiguration
         setupActionBarWithNavController(navController, appBarConfiguration)
         navView.setupWithNavController(navController)
+
+        // Check if service was running before app was killed
+        lifecycleScope.launch {
+            BleBackgroundService.serviceRunning.collect { wasRunning ->
+                if (wasRunning) {
+                    // Find the DashboardFragment and restart scanning
+                    val dashboardFragment = supportFragmentManager
+                        .findFragmentById(R.id.nav_host_fragment)
+                        ?.childFragmentManager
+                        ?.fragments
+                        ?.firstOrNull { it is DashboardFragment } as? DashboardFragment
+
+                    dashboardFragment?.startScanning()
+                }
+            }
+        }
     }
 
     private fun hasPermissions(vararg permissions: String): Boolean {

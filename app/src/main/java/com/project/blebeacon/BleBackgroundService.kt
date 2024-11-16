@@ -96,12 +96,13 @@ class BleBackgroundService : Service() {
                 val response = RetrofitInstance.apiService.getConfiguration(deviceId)
                 if (response.isSuccessful) {
                     response.body()?.let { configResponse ->
-                        val configurationData = configResponse.data.firstOrNull()
+                        // Find the configuration that matches this device's ID
+                        val configurationData = configResponse.data.find { it.deviceid == deviceId }
                         configurationData?.let { config ->
                             isDetectionEnabled = config.is_detection_enabled
                             samplingInterval = config.sampling_interval.toLong()
 
-                            Log.d("Configuration", "isDetectionEnabled: $isDetectionEnabled, samplingInterval: $samplingInterval")
+                            Log.d("Configuration", "For device $deviceId - isDetectionEnabled: $isDetectionEnabled, samplingInterval: $samplingInterval")
 
                             if (isDetectionEnabled) {
                                 startScanning()
@@ -109,7 +110,7 @@ class BleBackgroundService : Service() {
                                 stopScanning()
                             }
                         } ?: run {
-                            Log.e("Configuration", "No configuration data found.")
+                            Log.e("Configuration", "No configuration found for device ID: $deviceId")
                         }
                     }
                 } else {

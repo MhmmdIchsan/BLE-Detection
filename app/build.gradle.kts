@@ -14,6 +14,7 @@ if (localPropertiesFile.exists()) {
 }
 
 val apiBaseUrl = localProperties.getProperty("API_BASE_URL")
+val websocketUrl = localProperties.getProperty("WEBSOCKET_URL")
 
 android {
     namespace = "com.project.blebeacon"
@@ -28,6 +29,8 @@ android {
 
         // api url
         buildConfigField("String", "BASE_URL", "\"${apiBaseUrl}\"")
+        buildConfigField("String", "WEBSOCKET_URL", "\"${websocketUrl}\"")
+
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 

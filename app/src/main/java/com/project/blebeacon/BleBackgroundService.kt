@@ -10,6 +10,7 @@ import kotlinx.coroutines.*
 import android.app.PendingIntent
 import android.graphics.Color
 import android.util.Log
+import com.project.blebeacon.BuildConfig
 import kotlinx.coroutines.flow.*
 import org.json.JSONObject
 
@@ -63,7 +64,11 @@ class BleBackgroundService : Service() {
     }
 
     private fun initializeWebSocket() {
-        webSocketClient = WebSocketClient(BuildConfig.WEBSOCKET_URL + "production?deviceid=$deviceId") { message ->
+        webSocketClient = WebSocketClient(
+            "${BuildConfig.WEBSOCKET_URL}production?deviceid=$deviceId",
+            deviceId
+        )  // Pass deviceId to WebSocketClient
+        { message ->
             handleWebSocketMessage(message)
         }.apply {
             setOnConnectCallback {
@@ -314,7 +319,7 @@ class BleBackgroundService : Service() {
                 CHANNEL_NAME,
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
-                description = "BLE Beacon Scanner Service"
+                description = "BLE Scanner Service"
                 enableLights(true)
                 lightColor = Color.BLUE
             }
@@ -338,7 +343,7 @@ class BleBackgroundService : Service() {
         )
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("BLE Beacon Scanner")
+            .setContentTitle("BLE Scanner")
             .setContentText(content)
             .setSmallIcon(R.drawable.ic_launcher_foreground)
             .setContentIntent(pendingIntent)

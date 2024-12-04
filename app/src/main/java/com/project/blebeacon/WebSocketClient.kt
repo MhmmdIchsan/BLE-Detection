@@ -12,6 +12,7 @@ import kotlin.random.Random
 
 class WebSocketClient(
     private val url: String,
+    deviceId: String,
     private val onMessageReceived: (String) -> Unit
 ) {
     private val TAG = "WebSocketClient"

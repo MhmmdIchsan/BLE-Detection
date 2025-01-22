@@ -11,6 +11,6 @@ interface ApiService {
     @POST("bledemo/devices")
     suspend fun postDetection(@Body detectionRequest: DetectionRequest): Response<Unit>
 
-    @GET("bledemo/locationinfo") // Ganti dengan endpoint yang sesuai
+    @GET("bledemo/locationinfo")
     suspend fun getConfiguration(@Query("deviceid") deviceid: String): Response<ConfigurationResponse>
 }

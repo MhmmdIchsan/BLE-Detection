@@ -27,7 +27,7 @@ class BleBackgroundService : Service() {
     private val rssiThreshold = 5
 
     private var isDetectionEnabled = false
-    private var samplingInterval = 1L
+    private var samplingInterval = 5L
 
     companion object {
         private const val NOTIFICATION_ID = 123
@@ -104,13 +104,10 @@ class BleBackgroundService : Service() {
                 val response = RetrofitInstance.apiService.getConfiguration(deviceId)
                 if (response.isSuccessful) {
                     response.body()?.let { configResponse ->
-                        // Find the configuration that matches this device's ID
                         val configurationData = configResponse.data.find { it.deviceid == deviceId }
                         configurationData?.let { config ->
                             isDetectionEnabled = config.is_detection_enabled
                             samplingInterval = config.sampling_interval.toLong()
-
-                            Log.d("Configuration", "For device $deviceId - isDetectionEnabled: $isDetectionEnabled, samplingInterval: $samplingInterval")
 
                             if (isDetectionEnabled) {
                                 startScanning()
@@ -118,7 +115,11 @@ class BleBackgroundService : Service() {
                                 stopScanning()
                             }
                         } ?: run {
-                            Log.e("Configuration", "No configuration found for device ID: $deviceId")
+                            // Default configuration jika tidak ditemukan data spesifik device
+                            isDetectionEnabled = true
+                            samplingInterval = 5L
+                            startScanning()
+                            Log.d("Configuration", "No config for device, using defaults")
                         }
                     }
                 } else {
@@ -284,26 +285,19 @@ class BleBackgroundService : Service() {
     private suspend fun sendDetectionToApi(detection: Detection) {
         try {
             withContext(Dispatchers.IO) {
-                val request = if (detection.devices.isEmpty()) {
-                    DetectionRequest(
-                        deviceid = deviceId,
-                        timestamp = detection.timestamp,
-                        device = 0,
-                        addresses = listOf("null"),  // Explicitly send "null" as a string
-                        rssi = listOf(-999)           // Use a placeholder value if RSSI is needed as an integer
-                    )
-                } else {
-                    DetectionRequest(
+                // Hanya kirim jika ada perangkat yang terdeteksi
+                if (detection.devices.isNotEmpty()) {
+                    val request = DetectionRequest(
                         deviceid = deviceId,
                         timestamp = detection.timestamp,
                         device = detection.devices.size,
                         addresses = detection.devices.map { it.address },
                         rssi = detection.devices.map { it.rssi }
                     )
-                }
 
-                val response = RetrofitInstance.apiService.postDetection(request)
-                _apIStatusFlow.emit(response.isSuccessful)
+                    val response = RetrofitInstance.apiService.postDetection(request)
+                    _apIStatusFlow.emit(response.isSuccessful)
+                }
             }
         } catch (e: Exception) {
             e.printStackTrace()
